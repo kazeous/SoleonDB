@@ -26,11 +26,11 @@ export function createGuildService(db:AppDb,directory:GuildDirectory) {
       if(!result.rows[0]?.active||!result.rows[0].bot_present) throw new AppError('forbidden','Activate this server before editing settings');
     },
     async list(ownerId:string):Promise<GuildSummary[]> {
-      const current=await directory.list(ownerId);
-      for(const guild of current) await db.query('INSERT INTO guilds(id,name,icon_url,bot_present) VALUES($1,$2,$3,true) ON CONFLICT(id) DO UPDATE SET name=$2,icon_url=$3,bot_present=true',[guild.id,guild.name,guild.iconUrl]);
+      let current:GuildSummary[]|null=null;try{current=await directory.list(ownerId);}catch{/* Stored history remains readable; live writes still require assertEligible. */}
+      for(const guild of current??[]) await db.query('INSERT INTO guilds(id,name,icon_url,bot_present) VALUES($1,$2,$3,true) ON CONFLICT(id) DO UPDATE SET name=$2,icon_url=$3,bot_present=true',[guild.id,guild.name,guild.iconUrl]);
       const stored=await db.query<{id:string;name:string;icon_url:string|null;active:boolean}>('SELECT id,name,icon_url,active FROM guilds ORDER BY name,id');
-      const live=new Map(current.map(g=>[g.id,g]));
-      return stored.rows.map(g=>({id:g.id,name:g.name,iconUrl:g.icon_url,active:g.active&&live.has(g.id),eligible:live.get(g.id)?.eligible??false}));
+      const live=new Map((current??[]).map(g=>[g.id,g]));
+      return stored.rows.map(g=>({id:g.id,name:g.name,iconUrl:g.icon_url,active:g.active&&live.has(g.id),eligible:live.get(g.id)?.eligible??false,...(current===null?{eligibilityUnavailable:true}:{})}));
     },
     async activate(ownerId:string,guildId:string) {
       await assertEligible(ownerId,guildId);
@@ -42,4 +42,5 @@ export function createGuildService(db:AppDb,directory:GuildDirectory) {
 export type GuildService=ReturnType<typeof createGuildService>;
 // Explicit context keeps authorization independent of module-global application state.
 export async function assertGuildWrite(ownerId:string,guildId:string,service:GuildService):Promise<void> {await service.assertGuildWrite(ownerId,guildId);}
+
 
