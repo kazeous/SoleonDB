@@ -13,3 +13,5 @@ export const commandDefinitions:RESTPostAPIApplicationCommandsJSONBody[]=moderat
  return command.toJSON();
 });
 
+
+commandDefinitions.push(new SlashCommandBuilder().setName('verifysetup').setDescription('Post or explicitly replace the configured reaction verification panel').setDefaultMemberPermissions(268435456n).addChannelOption(option=>option.setName('channel').setDescription('Must match the saved verification channel')).addBooleanOption(option=>option.setName('replace').setDescription('Acknowledge replacement preserves prior assignments until re-verification')).toJSON());

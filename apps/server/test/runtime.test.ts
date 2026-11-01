@@ -50,3 +50,9 @@ it('fatal state drains and cannot remain healthy',async()=>{
  const runtime=createRuntime({clock,status,logger:createLogger({write(){}}),http:{async start(){},async stop(){closed=true;}},database:{async probe(){},async compatible(){return true;},async close(){}},lease:{async acquire(){return false;},async release(){},onLost(){}},discord:{async start(){},async stop(){}},features:[]});
  await runtime.start();expect(status.health().status).toBe(200);await runtime.fatal();expect(status.health().status).toBe(503);expect(closed).toBe(true);expect(vi.getTimerCount()).toBe(0);
 });
+
+it('keeps database probes fresh while Discord startup is still pending',async()=>{
+ vi.useFakeTimers();const clock=fakeClock(0),status=createStatus(clock);let ready=()=>{};const gateway=new Promise<void>(r=>{ready=r;});
+ const runtime=createRuntime({clock,status,logger:createLogger({write(){}}),http:{async start(){},async stop(){}},database:{async probe(){},async compatible(){return true;},async close(){}},lease:{async acquire(){return true;},async release(){},onLost(){}},discord:{async start(){await gateway;status.setDiscord(true);},async stop(){status.setDiscord(false);}},features:[]});
+ const starting=runtime.start();for(let i=0;i<10;i++)await Promise.resolve();clock.advance(11001);await vi.advanceTimersByTimeAsync(5000);ready();await starting;expect(status.ready().status).toBe(200);await runtime.stop();
+});

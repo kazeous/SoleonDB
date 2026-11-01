@@ -45,7 +45,8 @@ export function createRuntime(deps:RuntimeDeps) {
       status.setWorker(true);
       await bounded(()=>deps.discord.start(),10000);
       if(stopping||!status.snapshot().worker){await deactivate();return;}
-      for(const feature of deps.features){await feature.start();startedFeatures.push(feature);}
+      for(const feature of deps.features){if(stopping||!status.snapshot().worker)return;startedFeatures.push(feature);await feature.start();}
+      if(stopping||!status.snapshot().worker){await deactivate();return;}
       active=true;
     } catch {
       logger.error('Worker startup failed');await deactivate();await deps.lease.release();
@@ -63,8 +64,8 @@ export function createRuntime(deps:RuntimeDeps) {
     async start(){
       if(started)return;started=true;
       await deps.http.start();status.setInitialized(true);
+      scheduler.register('database-probe',5000,probe);scheduler.register('worker-maintenance',5000,maintain);
       await probe();await maintain();
-      if(!stopping){scheduler.register('database-probe',5000,probe);scheduler.register('worker-maintenance',5000,maintain);}
     },
     stop,
     async fatal(){status.setFatal(true);await stop();},

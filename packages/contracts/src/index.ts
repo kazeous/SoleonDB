@@ -8,3 +8,4 @@ export * from './channel-rules.js';
 export * from './moderation.js';
 export * from './automod.js';
 export * from './cases.js';
+export * from './verification.js';
