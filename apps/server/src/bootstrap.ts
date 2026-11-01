@@ -1,3 +1,6 @@
+import {createRolePickerService} from './features/roles/service.js';
+import {createRolesPort} from './features/roles/discord.js';
+import {registerRolePickerCommands} from './features/roles/commands.js';
 import {createServer} from 'node:http';
 import {createVerificationRepository} from './features/verification/repository.js';
 import {createVerificationService} from './features/verification/service.js';
@@ -80,6 +83,8 @@ export function bootstrap(env:RuntimeEnv) {
   discord.client.on(Events.MessageCreate,message=>{void messageHandler(message).catch(()=>{if(message.guildId)registry.set(message.guildId,'moderation','degraded','Message data or processing unavailable');logger.error({guildId:message.guildId},'Message handler failed');});});
   discord.client.on(Events.MessageUpdate,(_old,message)=>{void messageHandler(message).catch(()=>logger.error({guildId:message.guildId},'Message edit handler failed'));});
   discord.client.on(Events.GuildDelete,guild=>{void db.query('UPDATE guilds SET active=false,bot_present=false WHERE id=$1',[guild.id]).catch(()=>logger.error({guildId:guild.id},'Guild removal persistence failed'));});
+  const rolePickers=createRolePickerService({db,clock,port:createRolesPort(discord.client,accepts),status:registry});
+  registerRolePickerCommands(router,rolePickers);
   const verificationRepository=createVerificationRepository(db,clock);
   const verification=createVerificationService({repository:verificationRepository,port:createVerificationPort(discord.client,accepts),clock,status:registry});
   registerVerificationCommands(router,verification,verificationRepository);

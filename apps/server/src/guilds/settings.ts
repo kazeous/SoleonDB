@@ -1,5 +1,5 @@
 import type {FeatureConfigMap,SettingsKey,Versioned} from '@eousbot/contracts';
-import {settingsSchemas,settingsDefaults,isSettingsKey,moderationConfigSchema} from '@eousbot/contracts';
+import {settingsSchemas,settingsDefaults,isSettingsKey,moderationConfigSchema,rolesConfigSchema,verificationConfigSchema} from '@eousbot/contracts';
 import type {AppDb,SqlSession} from '../db/client.js';
 import {withTransaction} from '../db/client.js';
 import {withConfigLock} from '../db/locks.js';
@@ -24,6 +24,18 @@ export function createSettingsService(db:AppDb,clock:Clock) {
       const value=validate(key,input);
       if(!Number.isSafeInteger(expectedRevision)||expectedRevision<0) throw new AppError('validation','Invalid revision');
       return withTransaction(db,tx=>withConfigLock(tx,guildId,async()=>{
+        if(key==='roles'){
+          const roles=rolesConfigSchema.parse(value),verification=await readAt(tx,guildId,'verification');
+          for(const roleId of roles.assignableRoleIds){
+            const reserved=await tx.query("SELECT 1 FROM verification_panels p WHERE p.guild_id=$1 AND p.role_id=$2 AND (p.active OR p.state IN ('creating','unknown') OR EXISTS(SELECT 1 FROM verification_assignments a WHERE a.guild_id=p.guild_id AND a.generation=p.generation AND (a.role_granted OR a.operation<>'none'))) LIMIT 1",[guildId,roleId]);
+            if(verification.value.roleId===roleId||reserved.rowCount)throw new AppError('validation','Use a separate role for verification and role pickers');
+          }
+        }
+        if(key==='verification'){
+          const verification=verificationConfigSchema.parse(value),roles=await readAt(tx,guildId,'roles');
+          const bound=verification.roleId?await tx.query("SELECT 1 FROM role_picker_options o JOIN role_picker_panels p ON p.guild_id=o.guild_id AND p.id=o.panel_id WHERE o.guild_id=$1 AND o.role_id=$2 AND p.state IN ('creating','unknown','ready') LIMIT 1",[guildId,verification.roleId]):null;
+          if(verification.roleId&&(roles.value.assignableRoleIds.includes(verification.roleId)||bound?.rowCount))throw new AppError('validation','Use a dedicated verified role that is not bound to a role picker');
+        }
         const current=await readAt(tx,guildId,key);
         if(current.revision!==expectedRevision) throw new AppError('conflict','Settings changed. Reload before saving.');
         const logChannelId=key==='moderation' ? moderationConfigSchema.parse(value).logChannelId : null;
