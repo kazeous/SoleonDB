@@ -10,3 +10,4 @@ export * from '../features/voice/schema.js';
 export * from '../features/suggestions/schema.js';
 export * from '../features/starboard/schema.js';
 export * from '../features/threads/schema.js';
+export * from '../features/social/schema.js';

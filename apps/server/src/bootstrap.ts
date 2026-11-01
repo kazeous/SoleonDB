@@ -1,3 +1,6 @@
+import {createSocialService} from './features/social/service.js';
+import {createSocialRepository} from './features/social/repository.js';
+import {createSocialPort} from './features/social/discord.js';
 import {createAutoThreadService} from './features/threads/service.js';
 import {createAutoThreadPort} from './features/threads/discord.js';
 import {createStarboardService} from './features/starboard/service.js';
@@ -68,7 +71,7 @@ export function bootstrap(env:RuntimeEnv) {
   features.push({key:'moderation',async start(){unregisterPruning=registerPruning(pruneScheduler,[limit=>observationStore.prune(clock.now(),limit),limit=>generalAutoMod.prune(clock.now(),limit)]);},async stop(){unregisterPruning();await pruneScheduler.stop();}});
   const canDispatch=()=>status.ready().status===200;
   const moderationPort=createModerationPort(discord.client,canDispatch);
-  const relatedMessages={async list(_guildId:string,_sourceMessageId:string):Promise<Array<{channelId:string;messageId:string}>>{return [];}};
+  const relatedMessages=createSocialRepository(db,clock);
   const commandAuthority=createCommandAuthority(discord.client);
   const enforcement=createEnforcementService({db,clock,port:moderationPort,related:relatedMessages,canDispatch,authorizeCommand:async intent=>{if(intent.actorId&&intent.command)assertCommandAuthority(intent.command,await commandAuthority.inspect(intent.guildId,intent.actorId,intent.userId));},log:createCaseLogger({db,logger,registry,port:createModerationLogPort(discord.client,canDispatch)})});
   const moderationActions=createModerationActions({db,clock,authority:commandAuthority,enforcement});
@@ -100,8 +103,14 @@ export function bootstrap(env:RuntimeEnv) {
   discord.client.on(Events.MessageCreate,message=>{void messageHandler(message).catch(()=>{if(message.guildId)registry.set(message.guildId,'moderation','degraded','Message data or processing unavailable');logger.error({guildId:message.guildId},'Message handler failed');});});
   discord.client.on(Events.MessageUpdate,(_old,message)=>{void messageHandler(message).catch(()=>logger.error({guildId:message.guildId},'Message edit handler failed'));});
   discord.client.on(Events.GuildDelete,guild=>{void db.query('UPDATE guilds SET active=false,bot_present=false WHERE id=$1',[guild.id]).catch(()=>logger.error({guildId:guild.id},'Guild removal persistence failed'));});
+  const social=createSocialService({db,clock,port:createSocialPort(discord.client,accepts),status:registry,canDispatch});
+  const socialStage:MessageStage=async(message,disposition)=>{const current=disposition??{kind:'allow'};await social.process(message,current);return current;};
+  const socialScheduler=createScheduler(logger);let socialActive=false,removeSocialTimer=()=>{};
+  const recoverSocial=async()=>{const guilds=await db.query<{id:string}>('SELECT id FROM guilds WHERE active AND bot_present');for(const guild of guilds.rows)if(socialActive&&await accepts(guild.id))await social.reconcile(guild.id);};
+  features.push({key:'social',async start(){socialActive=true;removeSocialTimer=socialScheduler.register('social-recovery',300000,recoverSocial);await recoverSocial();},async stop(){socialActive=false;removeSocialTimer();await socialScheduler.stop();}});
   const autoThreads=createAutoThreadService({db,clock,port:createAutoThreadPort(discord.client,accepts),status:registry});
   messageStages.push(async(message,disposition)=>{const current=disposition??{kind:'allow' as const};await autoThreads.process(message,current);return current;});
+  messageStages.push(socialStage);
   const threadScheduler=createScheduler(logger);let threadActive=false,removeThreadRecovery=()=>{};
   const recoverThreads=async()=>{const guilds=await db.query<{id:string}>('SELECT id FROM guilds WHERE active AND bot_present');for(const guild of guilds.rows)if(threadActive&&await accepts(guild.id))await autoThreads.reconcile(guild.id);};
   features.push({key:'threads',async start(){threadActive=true;removeThreadRecovery=threadScheduler.register('auto-thread-recovery',300000,recoverThreads);await recoverThreads();},async stop(){threadActive=false;removeThreadRecovery();await threadScheduler.stop();}});

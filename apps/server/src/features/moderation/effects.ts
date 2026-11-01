@@ -1,3 +1,4 @@
+import {withMemberLock} from '../../db/locks.js';
 import type {AppDb,SqlSession} from '../../db/client.js';
 import {withTransaction} from '../../db/client.js';
 import type {CaseOutcome,IncidentIntent} from './incidents.js';
@@ -17,10 +18,11 @@ export function summarizeEffects(rows:EffectRow[]):CaseOutcome {
 }
 export async function completeEffect(db:AppDb,intent:IncidentIntent,key:string,state:string,now:number,reason?:string):Promise<void>{await db.query('UPDATE incident_effects SET state=$4,completed_at=$5,reason=$6 WHERE guild_id=$1 AND incident_id=$2 AND effect_key=$3 AND state<>$7',[intent.guildId,intent.id,key,state,now,reason??null,'cancelled']);}
 export async function finishIncident(db:AppDb,intent:IncidentIntent):Promise<CaseOutcome>{
- return withTransaction(db,async tx=>{
-  const outcome=summarizeEffects(await readEffects(tx,intent));
-  await tx.query("UPDATE moderation_incidents SET state='complete',lease_until=NULL,dispatch_token=NULL WHERE guild_id=$1 AND id=$2",[intent.guildId,intent.id]);
+ // Share the member lock with late-copy registration so finalization cannot strand new cleanup.
+ return withTransaction(db,tx=>withMemberLock(tx,intent.guildId,intent.userId,async()=>{
+  const effects=await readEffects(tx,intent),outcome=summarizeEffects(effects),state=effects.some(effect=>effect.state==='pending')?'pending':'complete';
+  await tx.query("UPDATE moderation_incidents SET state=$3,lease_until=NULL,dispatch_token=NULL WHERE guild_id=$1 AND id=$2",[intent.guildId,intent.id,state]);
   await tx.query('UPDATE moderation_cases SET outcome=$3 WHERE guild_id=$1 AND id=$2',[intent.guildId,intent.id,outcome]);return outcome;
- });
+ }));
 }
 

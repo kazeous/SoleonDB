@@ -15,3 +15,4 @@ export * from './voice.js';
 export * from './suggestions.js';
 export * from './starboard.js';
 export * from './threads.js';
+export * from './social.js';
