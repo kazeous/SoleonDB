@@ -6,10 +6,15 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "test": "node --test"
+    "test": "npm run test:unit",
+    "start:legacy": "node src/index.js",
+    "test:legacy": "node --test \"test/*.test.js\"",
+    "test:unit": "vitest run --project unit",
+    "typecheck": "npm run build -w @eousbot/contracts && npm run typecheck --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=24 <25"
   },
   "dependencies": {
     "cookie-parser": "^1.4.7",
@@ -19,5 +24,14 @@
   },
   "overrides": {
     "undici": "6.27.0"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "typescript": "7.0.2",
+    "vitest": "5.0.5"
   }
 }

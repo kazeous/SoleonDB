@@ -1,0 +1,14 @@
+{
+  "name": "@eousbot/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@eousbot/contracts": "0.1.0",
+    "pino": "10.4.0"
+  }
+}

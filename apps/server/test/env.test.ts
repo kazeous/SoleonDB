@@ -1,0 +1,9 @@
+import {it,expect} from 'vitest';
+import {parseRuntimeEnv} from '../src/core/env.js';
+import {createLogger} from '../src/core/logger.js';
+const valid={DISCORD_TOKEN:'token-secret-value',DISCORD_CLIENT_ID:'9223372036854775807',DISCORD_CLIENT_SECRET:'oauth-secret-value',OWNER_DISCORD_ID:'123456789012345678',DATABASE_URL:'postgresql://test:db-password@localhost/test',DASHBOARD_REDIRECT_URI:'http://localhost:3000/api/auth/discord/callback',SESSION_SECRET:'session-secret-value-at-least-32-characters'};
+it.each(['OWNER_DISCORD_ID','DATABASE_URL','SESSION_SECRET'])('rejects missing %s',key=>{expect(()=>parseRuntimeEnv({...valid,[key]:undefined})).toThrow();});
+it('redacts credential values in validation errors',()=>{try{parseRuntimeEnv({...valid,DATABASE_URL:'bad-SECRET',SESSION_SECRET:'tiny-SECRET'});expect.fail('must reject');}catch(error){expect(String(error)).not.toMatch(/SECRET|db-password|token-secret|oauth-secret/);}});
+it.each(['oops','0','65536','3.5',''])('rejects invalid port %s',PORT=>expect(()=>parseRuntimeEnv({...valid,PORT})).toThrow());
+it('validates configuration without making connections',()=>{const env=parseRuntimeEnv(valid);expect(env.ownerId).toBe(valid.OWNER_DISCORD_ID);expect(env.port).toBe(3000);});
+it('redacts structured logger credentials',()=>{let output='';const logger=createLogger({write(chunk:string){output+=chunk;}});logger.info({token:'hidden-token',databaseUrl:'hidden-db',headers:{authorization:'hidden-auth'},guildId:'123'},'operation');expect(output).not.toMatch(/hidden-/);expect(output).toContain('123');});
