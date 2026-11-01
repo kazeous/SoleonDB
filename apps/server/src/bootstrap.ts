@@ -1,3 +1,7 @@
+import {createCodeHelperRepository} from './features/code-helper/repository.js';
+import {createCodeHelperService} from './features/code-helper/service.js';
+import {createCodeHelperPort} from './features/code-helper/discord.js';
+import {registerCodeHelperCommands} from './features/code-helper/commands.js';
 import {createSummaryService} from './features/summaries/service.js';
 import {createSummaryProviders} from './features/summaries/providers.js';
 import {createSummaryPort} from './features/summaries/discord.js';
@@ -112,6 +116,11 @@ export function bootstrap(env:RuntimeEnv) {
   discord.client.on(Events.MessageCreate,message=>{void messageHandler(message).catch(()=>{if(message.guildId)registry.set(message.guildId,'moderation','degraded','Message data or processing unavailable');logger.error({guildId:message.guildId},'Message handler failed');});});
   discord.client.on(Events.MessageUpdate,(_old,message)=>{void messageHandler(message).catch(()=>logger.error({guildId:message.guildId},'Message edit handler failed'));});
   discord.client.on(Events.GuildDelete,guild=>{void db.query('UPDATE guilds SET active=false,bot_present=false WHERE id=$1',[guild.id]).catch(()=>logger.error({guildId:guild.id},'Guild removal persistence failed'));});
+  const codeHelper=createCodeHelperService({clock,settings:createSettingsService(db,clock),repository:createCodeHelperRepository(db,clock),port:createCodeHelperPort(discord.client,accepts),status:registry,canDispatch});registerCodeHelperCommands(router,codeHelper);
+  messageStages.push(async(message,disposition)=>{const current=disposition??{kind:'allow' as const};await codeHelper.process(message,current);return current;});
+  const codeHelperScheduler=createScheduler(logger);let codeHelperActive=false,removeCodeHelperTimer=()=>{};
+  const reconcileCodeHelper=async()=>{const guilds=await db.query<{id:string}>('SELECT id FROM guilds WHERE active AND bot_present');for(const guild of guilds.rows)if(codeHelperActive&&await accepts(guild.id))await codeHelper.reconcile(guild.id);};
+  features.push({key:'productivity',async start(){codeHelperActive=true;removeCodeHelperTimer=codeHelperScheduler.register('code-helper-expiry',15000,reconcileCodeHelper);await reconcileCodeHelper();},async stop(){codeHelperActive=false;removeCodeHelperTimer();await codeHelperScheduler.stop();}});
   const summaries=createSummaryService({settings:createSettingsService(db,clock),port:createSummaryPort(discord.client,accepts,{messageContentEnabled:env.enableMessageContent}),providers:createSummaryProviders({fetchPublicText,config:env.summaryProviderConfig}),logger,status:registry});registerSummaryCommands(router,summaries);
   const feeds=createFeedDelivery({db,clock,providers:createFeedProviders({fetchPublicText,clock,credentials:env.feedCredentials}),port:createFeedPort(discord.client,accepts),status:registry,canDispatch});features.push(createFeedScheduler({db,clock,logger,delivery:feeds,canRun:canDispatch}));
   const social=createSocialService({db,clock,port:createSocialPort(discord.client,accepts),status:registry,canDispatch});

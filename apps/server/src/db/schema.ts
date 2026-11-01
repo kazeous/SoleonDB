@@ -12,3 +12,4 @@ export * from '../features/starboard/schema.js';
 export * from '../features/threads/schema.js';
 export * from '../features/social/schema.js';
 export * from '../features/feeds/schema.js';
+export * from '../features/code-helper/schema.js';
