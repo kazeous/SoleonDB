@@ -1,3 +1,5 @@
+import {syncFeedSettings} from '../features/feeds/repository.js';
+import {feedsConfigSchema} from '@eousbot/contracts';
 import type {FeatureConfigMap,SettingsKey,Versioned} from '@eousbot/contracts';
 import {settingsSchemas,settingsDefaults,isSettingsKey,moderationConfigSchema,rolesConfigSchema,verificationConfigSchema} from '@eousbot/contracts';
 import type {AppDb,SqlSession} from '../db/client.js';
@@ -44,6 +46,7 @@ export function createSettingsService(db:AppDb,clock:Clock) {
           if(!local.rowCount) throw new AppError('validation','Choose a text channel in this server',{logChannelId:'Invalid channel'});
         }
         const revision=current.revision+1;
+        if(key==='feeds')await syncFeedSettings(tx,guildId,feedsConfigSchema.parse(value),clock.now());
         await tx.query('INSERT INTO feature_settings(guild_id,feature,revision,value,log_channel_id) VALUES($1,$2,$3,$4,$5) ON CONFLICT(guild_id,feature) DO UPDATE SET revision=$3,value=$4,log_channel_id=$5',[guildId,key,revision,value,logChannelId]);
         await tx.query('INSERT INTO configuration_audit(guild_id,actor_id,feature,previous_value,new_value,created_at) VALUES($1,$2,$3,$4,$5,$6)',[guildId,actorId,key,current.value,value,clock.now()]);
         return {revision,value};
