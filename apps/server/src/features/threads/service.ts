@@ -1,0 +1,19 @@
+import type {ThreadsConfig} from '@eousbot/contracts';
+import type {AppDb} from '../../db/client.js';
+import type {Clock} from '../../core/clock.js';
+import type {FeatureStatusRegistry} from '../../core/status.js';
+import {createSettingsService} from '../../guilds/settings.js';
+import type {MessageSnapshot,MessageDisposition} from '../../discord/messages.js';
+import {createAutoThreadRepository} from './repository.js';
+import type {AutoThreadRecord} from './repository.js';
+export class ThreadPortError extends Error{constructor(public readonly outcome:'rejected'|'unknown',message:string){super(message);}}
+export interface AutoThreadPort{existingForMessage(guildId:string,channelId:string,messageId:string):Promise<string|null>;createForMessage(guildId:string,channelId:string,messageId:string,name:string,autoArchiveDuration?:ThreadsConfig['autoArchiveDuration']):Promise<string>}
+export function createAutoThreadService(deps:{db:AppDb;clock:Clock;port:AutoThreadPort;status:FeatureStatusRegistry}){
+ const {db,clock,port,status}=deps,repository=createAutoThreadRepository(db,clock),settings=createSettingsService(db,clock);
+ async function attempt(record:AutoThreadRecord,allowCreate:boolean):Promise<void>{if(!await repository.claim(record.guildId,record.messageId))return;try{const existing=await port.existingForMessage(record.guildId,record.channelId,record.messageId);if(existing){await repository.mark(record.guildId,record.messageId,'ready',existing);status.set(record.guildId,'threads','ready');return;}if(!allowCreate){status.set(record.guildId,'threads','degraded','Thread creation is unconfirmed. Existing-thread reconciliation will retry without creating another.');return;}const current=await settings.read(record.guildId,'threads');if(!current.value.enabled||!current.value.channelIds.includes(record.channelId)||current.revision!==record.settingsRevision){await repository.mark(record.guildId,record.messageId,'cancelled');return;}await repository.mark(record.guildId,record.messageId,'creating');const threadId=await port.createForMessage(record.guildId,record.channelId,record.messageId,record.name,record.autoArchiveDuration);await repository.mark(record.guildId,record.messageId,'ready',threadId);status.set(record.guildId,'threads','ready');}catch(error){const known=error instanceof ThreadPortError&&error.outcome==='rejected';await repository.mark(record.guildId,record.messageId,known&&allowCreate?'blocked':'unknown');status.set(record.guildId,'threads','degraded',known?'Thread creation was blocked. Check Create Public Threads, Send Messages in Threads, View Channel and Read Message History.':'Thread creation is unconfirmed; no blind retry will create another thread.');}finally{await repository.release(record.guildId,record.messageId);}}
+ return {
+  async process(message:MessageSnapshot,disposition:MessageDisposition):Promise<void>{if(disposition.kind==='delete'||message.authorKind!=='human'||message.isThread||message.partial||message.editedAt!==null)return;const config=await settings.read(message.guildId,'threads');if(!config.value.enabled||!config.value.channelIds.includes(message.channelId)){status.set(message.guildId,'threads',config.value.enabled&&config.value.channelIds.length?'ready':'disabled');return;}const name=(message.content.replaceAll(/<[^>]*>|[`*_~#]/g,'').replaceAll(/\s+/g,' ').trim()||'Discussion').slice(0,100);await repository.reserve(message.guildId,message.channelId,message.id,name,config.revision);const record=await repository.read(message.guildId,message.id);if(record)await attempt(record,record.state==='pending');},
+  async reconcile(guildId:string):Promise<void>{for(const record of await repository.pending(guildId))await attempt(record,record.state==='pending');},
+ };
+}
+export type AutoThreadService=ReturnType<typeof createAutoThreadService>;

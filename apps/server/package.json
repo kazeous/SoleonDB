@@ -1,0 +1,22 @@
+{
+  "name": "@eousbot/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/copy-migrations.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@eousbot/contracts": "0.1.0",
+    "discord.js": "14.28.0",
+    "drizzle-orm": "0.45.4",
+    "express": "5.3.0",
+    "express-session": "1.19.0",
+    "fast-xml-parser": "5.11.2",
+    "ipaddr.js": "2.5.0",
+    "linkify-it": "6.1.0",
+    "pg": "8.23.1",
+    "pino": "10.4.0"
+  }
+}

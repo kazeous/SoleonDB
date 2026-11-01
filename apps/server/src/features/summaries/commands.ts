@@ -1,0 +1,6 @@
+import {toUSVString} from 'node:util';
+import {AppError} from '../../core/errors.js';
+import type {CommandRouter} from '../../discord/interactions.js';
+import type {SummaryService} from './service.js';
+export function chunkSummary(text:string):string[]{const max=1900;text=toUSVString(text);const result:string[]=[];for(let offset=0;offset<text.length;){let end=Math.min(offset+max,text.length);if(/[\uD800-\uDBFF]/.test(text[end-1]??''))end--;result.push(text.slice(offset,end));offset=end;}return result.length?result:['No summary text is available.'];}
+export function registerSummaryCommands(router:CommandRouter,service:SummaryService):void{for(const [kind,name] of [['command','summarize'],['context','Summarize Discussion']] as const)router.register({kind,name,handler:async context=>{const result=await service.summarize({guildId:context.guildId!,channelId:context.channelId!,actorId:context.userId!,limit:typeof context.options.limit==='number'?context.options.limit:50}),parts=chunkSummary(result.text);await context.edit(parts[0]!);for(const part of parts.slice(1)){if(!context.followUp)throw new AppError('unavailable','Summary delivery failed. Try a smaller history limit.');await context.followUp(part);}}});}

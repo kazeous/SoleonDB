@@ -1,0 +1,6 @@
+import {z} from 'zod';
+export class ApiFailure extends Error{constructor(public status:number,public code:string,message:string,public fields?:Record<string,string>){super(message);}}
+let csrf='';export function setCsrf(value:string){csrf=value;}
+async function request<T>(method:string,path:string,body:unknown,schema:z.ZodType<T>,options:{signal?:AbortSignal}={}):Promise<T>{const response=await fetch(path,{...options,method,credentials:'same-origin',headers:{...(body!==undefined?{'content-type':'application/json'}:{}),...(method!=='GET'?{'x-csrf-token':csrf}:{})},...(body!==undefined?{body:JSON.stringify(body)}:{})});if(!response.ok){let error:any;try{error=await response.json();}catch{}if(response.status===401)window.dispatchEvent(new Event('session-expired'));throw new ApiFailure(response.status,error?.code??'unavailable',error?.message??'The server is unavailable. Please retry.',error?.fields);}if(response.status===204)return schema.parse(undefined);return schema.parse(await response.json());}
+export const api={get:<T>(path:string,schema:z.ZodType<T>,options?:{signal?:AbortSignal})=>request('GET',path,undefined,schema,options),mutate:<T>(method:string,path:string,body:unknown,schema:z.ZodType<T>)=>request(method,path,body,schema)};
+

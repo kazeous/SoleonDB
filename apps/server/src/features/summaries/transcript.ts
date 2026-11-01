@@ -1,0 +1,3 @@
+import type {MessageSnapshot} from '../../discord/messages.js';
+export function visibleTextMessages(messages:MessageSnapshot[]):MessageSnapshot[]{const unique=new Map<string,MessageSnapshot>();for(const message of messages)if(message.authorKind==='human'&&!message.partial&&message.content.trim())unique.set(message.id,message);return [...unique.values()].sort((a,b)=>a.createdAt-b.createdAt||(BigInt(a.id)<BigInt(b.id)?-1:BigInt(a.id)>BigInt(b.id)?1:0));}
+export function buildTranscript(messages:MessageSnapshot[]):string{return JSON.stringify(visibleTextMessages(messages).map(message=>({author:message.member.displayName.replace(/[\r\n\t]/g,' ').slice(0,80),text:message.content.slice(0,300).replace(/[\uD800-\uDBFF]$/,'')})));}

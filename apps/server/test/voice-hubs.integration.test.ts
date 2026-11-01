@@ -1,0 +1,42 @@
+import {it,expect,vi} from 'vitest';
+import {withTestDb,seedGuild} from './database.js';
+import {fakeClock} from './clock.js';
+import {FeatureStatusRegistry} from '../src/core/status.js';
+import {createSettingsService} from '../src/guilds/settings.js';
+import {createVoiceRepository} from '../src/features/voice/repository.js';
+import {createVoiceHubService} from '../src/features/voice/hubs.js';
+import {createVoiceRecovery} from '../src/features/voice/recovery.js';
+const guild='9223372036854775807',user='123456789012345678',hub='111111111111111111',roomId='222222222222222222';
+async function fixture(db:any){await seedGuild(db,guild);const clock=fakeClock(1000),settings=createSettingsService(db,clock);await settings.update(guild,'voice',{enabled:true,hubChannelIds:[hub],roomFormat:'Voice - {user}'},(await settings.read(guild,'voice')).revision,user);const rooms=new Map<string,any>();let current:string|null=hub;const port={hub:async()=>({name:'Hub',parentId:null}),member:async()=>({id:user,guildId:guild,isBot:false,displayName:'Alice',voiceChannelId:current,permissions:'0',game:null}),createRoom:vi.fn(async(_g:string,_h:string,_u:string,_n:string,operationId:string)=>{rooms.set(roomId,{guildId:guild,channelId:roomId,parentId:null,memberIds:[],maxBitrate:96000,regions:['singapore'],textEnabled:true,nsfw:false});return roomId;}),findCreatedRoom:vi.fn(async()=>rooms.has(roomId)?roomId:null),move:vi.fn(async()=>{current=roomId;rooms.get(roomId).memberIds=[user];}),getRoom:vi.fn(async(_g:string,id:string)=>rooms.get(id)??null),deleteRoom:vi.fn(async(_g:string,id:string)=>{if(rooms.get(id)?.memberIds.length)return false;rooms.delete(id);return true;}),panelExists:vi.fn(async()=>true),findPanel:vi.fn(async()=>null),postOrEditPanel:vi.fn(async()=> '333333333333333333')},repository=createVoiceRepository(db,clock),status=new FeatureStatusRegistry(clock),make=()=>createVoiceHubService({settings,repository,port,status} as never),recover=()=>createVoiceRecovery({repository,port,status} as never);return {port,rooms,repository,make,recover,async changed(){await make().changed({guildId:guild,userId:user,oldChannelId:null,newChannelId:hub});}};}
+it('duplicate concurrent hub transitions allocate exactly one room and persist the owner',()=>withTestDb(async db=>{const f=await fixture(db),service=f.make(),event={guildId:guild,userId:user,oldChannelId:null,newChannelId:hub};await Promise.all([service.changed(event),service.changed(event)]);expect(f.port.createRoom).toHaveBeenCalledTimes(1);expect((await createVoiceRepository(db,fakeClock()).byChannel(guild,roomId))?.ownerId).toBe(user);expect(f.port.postOrEditPanel).toHaveBeenCalledTimes(1);}));
+it('move failure deletes only the new empty room and never an occupied room',()=>withTestDb(async db=>{const f=await fixture(db);f.port.move.mockRejectedValue(new Error('move blocked'));await f.changed();expect(f.port.deleteRoom).toHaveBeenCalledWith(guild,roomId);expect(f.rooms.size).toBe(0);const second=await fixtureOccupied(db);expect(second).toBe(true);}));
+async function fixtureOccupied(db:any){const f=await fixture(db);f.port.move.mockImplementation(async()=>{f.rooms.get(roomId).memberIds=['444444444444444444'];throw new Error('move failed');});await f.changed();expect(f.port.deleteRoom).not.toHaveBeenCalled();return f.rooms.has(roomId);}
+it('startup removes only recorded empty rooms and reconstructs occupied ownership',()=>withTestDb(async db=>{const f=await fixture(db);await f.changed();f.rooms.set('555555555555555555',{memberIds:[]});await f.recover().reconcile(guild);expect(f.rooms.has(roomId)).toBe(true);expect(f.rooms.has('555555555555555555')).toBe(true);f.rooms.get(roomId).memberIds=[];await f.recover().reconcile(guild);expect(f.rooms.has(roomId)).toBe(false);expect(f.rooms.has('555555555555555555')).toBe(true);}));
+it('a missing control panel is repaired once and the binding survives reconstruction',()=>withTestDb(async db=>{const f=await fixture(db);await f.changed();f.port.postOrEditPanel.mockClear();f.port.panelExists.mockResolvedValue(false);await Promise.all([f.recover().reconcile(guild),f.recover().reconcile(guild)]);expect(f.port.postOrEditPanel).toHaveBeenCalledTimes(1);expect((await f.repository.byChannel(guild,roomId))?.panelId).toBe('333333333333333333');}));
+it('a pending accepted creation is recovered without creating a duplicate',()=>withTestDb(async db=>{const f=await fixture(db);f.port.createRoom.mockImplementationOnce(async()=>{f.rooms.set(roomId,{guildId:guild,channelId:roomId,parentId:null,memberIds:[user]});throw new Error('connection lost after create');});await f.changed();expect(f.port.createRoom).toHaveBeenCalledTimes(1);await f.recover().reconcile(guild);expect(f.port.createRoom).toHaveBeenCalledTimes(1);expect((await f.repository.byChannel(guild,roomId))?.ownerId).toBe(user);}));
+it('recovered occupied move-failed room becomes ready for its recorded owner controls',()=>withTestDb(async db=>{const f=await fixture(db);f.port.move.mockImplementation(async()=>{f.rooms.get(roomId).memberIds=['444444444444444444'];throw new Error('move failed');});await f.changed();expect((await f.repository.byChannel(guild,roomId))?.state).toBe('move_failed');await f.recover().reconcile(guild);expect((await f.repository.byChannel(guild,roomId))?.state).toBe('ready');expect(f.port.deleteRoom).not.toHaveBeenCalled();}));
+
+it('an accepted panel with a lost SQL binding is never resent after the lookup window',()=>withTestDb(async db=>{
+ const f=await fixture(db);const save=f.repository.update.bind(f.repository);let fail=true;
+ f.repository.update=async(g,id,patch)=>{if(patch.panelId&&fail){fail=false;throw new Error('SQL binding unavailable after Discord accepted');}await save(g,id,patch);};
+ (f.port as any).findPanel=vi.fn(async()=>null);
+ await f.changed();expect(f.port.postOrEditPanel).toHaveBeenCalledTimes(1);
+ await f.recover().reconcile(guild);await f.recover().reconcile(guild);
+ expect(f.port.postOrEditPanel).toHaveBeenCalledTimes(1);
+ expect((await db.query('SELECT panel_state FROM voice_rooms')).rows[0].panel_state).toBe('unknown');
+}));
+it('a deleted bound panel gets a distinct durable operation and an ambiguous replacement is not resent',()=>withTestDb(async db=>{
+ const f=await fixture(db);await f.changed();const first=f.port.postOrEditPanel.mock.calls[0] as any[];
+ (f.port as any).panelExists=vi.fn(async()=>false);(f.port as any).findPanel=vi.fn(async()=>null);
+ f.port.postOrEditPanel.mockImplementation(async()=>{throw new Error('accepted but response lost');});
+ await f.recover().reconcile(guild);const replacement=f.port.postOrEditPanel.mock.calls[1] as any[];
+ expect(replacement[4]).not.toBe(first[4]);await f.recover().reconcile(guild);
+ expect(f.port.postOrEditPanel).toHaveBeenCalledTimes(2);
+ expect((await db.query('SELECT panel_state FROM voice_rooms')).rows[0].panel_state).toBe('unknown');
+}));
+it('recovery binds an accepted panel by its durable delivery identity without sending',()=>withTestDb(async db=>{
+ const f=await fixture(db);f.port.postOrEditPanel.mockImplementationOnce(async()=>{throw new Error('accepted but response lost');});
+ (f.port as any).findPanel=vi.fn(async()=> '333333333333333333');await f.changed();await f.recover().reconcile(guild);
+ expect(f.port.postOrEditPanel).toHaveBeenCalledTimes(1);expect((await f.repository.byChannel(guild,roomId))?.panelId).toBe('333333333333333333');
+ expect((await db.query('SELECT panel_state FROM voice_rooms')).rows[0].panel_state).toBe('sent');
+}));

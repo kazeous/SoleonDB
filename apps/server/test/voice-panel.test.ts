@@ -1,0 +1,7 @@
+import {it,expect,vi} from 'vitest';
+import {ChannelType} from 'discord.js';
+import {createVoicePort} from '../src/features/voice/discord.js';
+import {buildVoicePanel,parseVoicePanelAction} from '../src/features/voice/panel.js';
+const guild='9223372036854775807',channel='222222222222222222',owner='123456789012345678';
+it('publishes all twenty controls and uses a persisted room identity',()=>{const panel=buildVoicePanel(guild,channel,owner,'operation');const controls=panel.components.flatMap(row=>row.components.flatMap(menu=>menu.toJSON().options));expect(controls).toHaveLength(20);expect(new Set(panel.components.map(row=>row.components[0]!.toJSON().custom_id)).size).toBe(2);expect(panel.allowedMentions).toEqual({parse:[]});expect(parseVoicePanelAction('voice:'+channel+':'+owner+':transfer',{value:'444444444444444444'})).toEqual({channelId:channel,action:{kind:'transfer',userId:'444444444444444444',expectedOwnerId:owner}});});
+it('rechecks occupied room state at the concrete deletion boundary',async()=>{const deleted=vi.fn(),room={id:channel,guildId:guild,type:ChannelType.GuildVoice,members:new Map([[owner,{}]]),delete:deleted},client={isReady:()=>true,guilds:{cache:new Map([[guild,{channels:{fetch:vi.fn(async()=>room)}}]])}};const port=createVoicePort(client as never,async()=>true);expect(await port.deleteRoom(guild,channel)).toBe(false);expect(deleted).not.toHaveBeenCalled();room.members.clear();expect(await port.deleteRoom(guild,channel)).toBe(true);expect(deleted).toHaveBeenCalledTimes(1);});

@@ -1,0 +1,179 @@
+import {createStatusInspection} from './discord/status.js';
+import {fileURLToPath} from 'node:url';
+import {registerDashboard} from './http/dashboard.js';
+import {registerCatFactCommand} from './features/cat-facts/commands.js';
+import {createCodeHelperRepository} from './features/code-helper/repository.js';
+import {createCodeHelperService} from './features/code-helper/service.js';
+import {createCodeHelperPort} from './features/code-helper/discord.js';
+import {registerCodeHelperCommands} from './features/code-helper/commands.js';
+import {createSummaryService} from './features/summaries/service.js';
+import {createSummaryProviders} from './features/summaries/providers.js';
+import {createSummaryPort} from './features/summaries/discord.js';
+import {registerSummaryCommands} from './features/summaries/commands.js';
+import {createFeedProviders} from './features/feeds/providers/index.js';
+import {createFeedDelivery} from './features/feeds/delivery.js';
+import {createFeedPort} from './features/feeds/discord.js';
+import {createFeedScheduler} from './features/feeds/scheduler.js';
+import {fetchPublicText} from './http-client/public-fetch.js';
+import {createSocialService} from './features/social/service.js';
+import {createSocialRepository} from './features/social/repository.js';
+import {createSocialPort} from './features/social/discord.js';
+import {createAutoThreadService} from './features/threads/service.js';
+import {createAutoThreadPort} from './features/threads/discord.js';
+import {createStarboardService} from './features/starboard/service.js';
+import {createStarboardPort,registerStarboardEvents} from './features/starboard/discord.js';
+import {createSuggestionService} from './features/suggestions/service.js';
+import {createSuggestionPort} from './features/suggestions/discord.js';
+import {registerSuggestionCommands} from './features/suggestions/commands.js';
+import {createVoiceRepository} from './features/voice/repository.js';
+import {createVoiceHubService} from './features/voice/hubs.js';
+import {createVoiceRecovery} from './features/voice/recovery.js';
+import {createVoiceControlService} from './features/voice/controls.js';
+import {registerVoiceControls,handleVoicePrompt} from './features/voice/panel.js';
+import {createVoicePort,registerVoiceEvents} from './features/voice/discord.js';
+import {createSettingsService} from './guilds/settings.js';
+import {createGreetingService,createGreetingDeliveryStore} from './features/greetings/service.js';
+import {createGreetingPort,registerGreetingEvents} from './features/greetings/discord.js';
+import {createRolePickerService} from './features/roles/service.js';
+import {createRolesPort} from './features/roles/discord.js';
+import {registerRolePickerCommands} from './features/roles/commands.js';
+import {createServer} from 'node:http';
+import {createVerificationRepository} from './features/verification/repository.js';
+import {createVerificationService} from './features/verification/service.js';
+import {createVerificationPort,registerVerificationEvents} from './features/verification/discord.js';
+import {registerVerificationCommands} from './features/verification/commands.js';
+import {createCommandAuthority,createCleanMessagePort} from './discord/moderation-commands.js';
+import {createModerationActions} from './features/moderation/actions.js';
+import {createCleanService} from './features/moderation/clean.js';
+import {createCaseRepository} from './features/moderation/cases.js';
+import {registerModerationCommands,assertCommandAuthority} from './features/moderation/commands.js';
+import {createGeneralAutoMod,createProtectionStage} from './features/automod/service.js';
+import {createRuleRepository} from './features/protection/repository.js';
+import {createEnforcementService} from './features/moderation/enforcement.js';
+import {createRecoveryService} from './features/moderation/recovery.js';
+import {createCaseLogger} from './features/moderation/logging.js';
+import {createModerationPort,createModerationLogPort} from './discord/moderation.js';
+import {createIncidentWorker} from './jobs/incident-worker.js';
+import {createProtectionEngine} from './features/protection/engine.js';
+import {createObservationRepository} from './features/protection/observations.js';
+import {registerPruning} from './db/pruning.js';
+import {createScheduler} from './jobs/scheduler.js';
+import {Events} from 'discord.js';
+import type {RuntimeEnv} from './core/env.js';
+import {createClock} from './core/clock.js';
+import {createLogger} from './core/logger.js';
+import {createStatus,FeatureStatusRegistry,checkRequiredIntents} from './core/status.js';
+import {createRuntime} from './core/runtime.js';
+import {createWorkerLease} from './core/worker-lock.js';
+import {createDb} from './db/client.js';
+import {readMigrationFiles} from 'drizzle-orm/migrator';
+import {migrationsFolder} from './db/migrate.js';
+import {createHttpApp} from './http/app.js';
+import {createOAuth} from './auth/oauth.js';
+import {createDiscordClient,snapshotMessage,interactionContext} from './discord/client.js';
+import {createGuildDirectory} from './discord/directory.js';
+import {createCommandRouter} from './discord/interactions.js';
+import {createMessagePipeline} from './discord/messages.js';
+import type {MessageStage} from './discord/messages.js';
+import type {FeatureModule} from '@eousbot/contracts';
+export function bootstrap(env:RuntimeEnv) {
+  const clock=createClock(),logger=createLogger(),status=createStatus(clock),registry=new FeatureStatusRegistry(clock);
+  const db=createDb(env.databaseUrl),discord=createDiscordClient(env,status),directory=createGuildDirectory(discord.client),router=createCommandRouter([]);
+  const messageStages:MessageStage[]=[],features:FeatureModule[]=[];
+  const pipeline=createMessagePipeline(messageStages);
+  const protection=createProtectionEngine(db,clock),observationStore=createObservationRepository(db),pruneScheduler=createScheduler(logger);
+  const generalAutoMod=createGeneralAutoMod(db,clock);
+  messageStages.push(createProtectionStage(protection,generalAutoMod,createRuleRepository(db)));
+  let unregisterPruning=()=>{};
+  features.push({key:'moderation',async start(){unregisterPruning=registerPruning(pruneScheduler,[limit=>observationStore.prune(clock.now(),limit),limit=>generalAutoMod.prune(clock.now(),limit)]);},async stop(){unregisterPruning();await pruneScheduler.stop();}});
+  const canDispatch=()=>status.ready().status===200;
+  const moderationPort=createModerationPort(discord.client,canDispatch);
+  const relatedMessages=createSocialRepository(db,clock);
+  const commandAuthority=createCommandAuthority(discord.client);
+  const enforcement=createEnforcementService({db,clock,port:moderationPort,related:relatedMessages,canDispatch,authorizeCommand:async intent=>{if(intent.actorId&&intent.command)assertCommandAuthority(intent.command,await commandAuthority.inspect(intent.guildId,intent.actorId,intent.userId));},log:createCaseLogger({db,logger,registry,port:createModerationLogPort(discord.client,canDispatch)})});
+  const moderationActions=createModerationActions({db,clock,authority:commandAuthority,enforcement});
+  const cleanService=createCleanService({db,clock,authority:commandAuthority,enforcement,port:createCleanMessagePort(discord.client)});
+  registerModerationCommands(router,{authority:commandAuthority,actions:moderationActions,cases:createCaseRepository(db),clean:cleanService});
+  const recovery=createRecoveryService({db,clock,port:moderationPort});
+  features.push(createIncidentWorker({db,clock,logger,enforcement,recovery,canRun:canDispatch}));
+  const app=createHttpApp({inspection:createStatusInspection(discord.client),featureStatus:registry,env,db,clock,logger,directory,oauth:createOAuth(env),status});registerDashboard(app,fileURLToPath(new URL('../../dashboard/dist',import.meta.url)));const server=createServer(app);
+  db.pool.on('error',()=>{status.recordProbe(false);logger.error('Database connection failed');});
+  async function accepts(guildId:string):Promise<boolean> {
+    if(status.ready().status!==200)return false;
+    const row=await db.query<{active:boolean;bot_present:boolean}>('SELECT active,bot_present FROM guilds WHERE id=$1',[guildId]);
+    return row.rows[0]?.active===true&&row.rows[0].bot_present===true;
+  }
+  discord.client.on(Events.InteractionCreate,interaction=>{
+    void (async()=>{
+      if(!status.snapshot().worker)return;
+      if(await handleVoicePrompt(interaction,discord.client.user?.id))return;
+      const context=await interactionContext(interaction);if(!context)return;
+      if(!context.guildId||!await accepts(context.guildId)){await context.reply('This server is not activated or the bot is reconnecting.');return;}
+      await router.dispatch(context);
+    })().catch(()=>{logger.error({guildId:interaction.guildId},'Interaction handler failed');if(interaction.isRepliable()&&(interaction.deferred||interaction.replied))void interaction.editReply({content:'Action failed. Please retry.',allowedMentions:{parse:[]}}).catch(()=>undefined);});
+  });
+  const messageHandler=async(message:Parameters<typeof snapshotMessage>[0])=>{
+    if(!message.guildId||!await accepts(message.guildId))return;
+    if(!env.enableMessageContent){checkRequiredIntents(registry,message.guildId,{messageContent:false,presence:env.enablePresences},[{key:'moderation',messageContent:true},{key:'social',messageContent:true}]);return;}
+    const snapshot=await snapshotMessage(message);if(snapshot)await pipeline(snapshot);
+  };
+  discord.client.on(Events.MessageCreate,message=>{void messageHandler(message).catch(()=>{if(message.guildId)registry.set(message.guildId,'moderation','degraded','Message data or processing unavailable');logger.error({guildId:message.guildId},'Message handler failed');});});
+  discord.client.on(Events.MessageUpdate,(_old,message)=>{void messageHandler(message).catch(()=>logger.error({guildId:message.guildId},'Message edit handler failed'));});
+  discord.client.on(Events.GuildDelete,guild=>{void db.query('UPDATE guilds SET active=false,bot_present=false WHERE id=$1',[guild.id]).catch(()=>logger.error({guildId:guild.id},'Guild removal persistence failed'));});
+  const codeHelper=createCodeHelperService({clock,settings:createSettingsService(db,clock),repository:createCodeHelperRepository(db,clock),port:createCodeHelperPort(discord.client,accepts),status:registry,canDispatch});registerCodeHelperCommands(router,codeHelper);
+  messageStages.push(async(message,disposition)=>{const current=disposition??{kind:'allow' as const};await codeHelper.process(message,current);return current;});
+  const codeHelperScheduler=createScheduler(logger);let codeHelperActive=false,removeCodeHelperTimer=()=>{};
+  const reconcileCodeHelper=async()=>{const guilds=await db.query<{id:string}>('SELECT id FROM guilds WHERE active AND bot_present');for(const guild of guilds.rows)if(codeHelperActive&&await accepts(guild.id))await codeHelper.reconcile(guild.id);};
+  features.push({key:'productivity',async start(){codeHelperActive=true;removeCodeHelperTimer=codeHelperScheduler.register('code-helper-expiry',15000,reconcileCodeHelper);await reconcileCodeHelper();},async stop(){codeHelperActive=false;removeCodeHelperTimer();await codeHelperScheduler.stop();}});
+  registerCatFactCommand(router,fetchPublicText);
+  const summaries=createSummaryService({settings:createSettingsService(db,clock),port:createSummaryPort(discord.client,accepts,{messageContentEnabled:env.enableMessageContent}),providers:createSummaryProviders({fetchPublicText,config:env.summaryProviderConfig}),logger,status:registry});registerSummaryCommands(router,summaries);
+  const feeds=createFeedDelivery({db,clock,providers:createFeedProviders({fetchPublicText,clock,credentials:env.feedCredentials}),port:createFeedPort(discord.client,accepts),status:registry,canDispatch});features.push(createFeedScheduler({db,clock,logger,delivery:feeds,canRun:canDispatch}));
+  const social=createSocialService({db,clock,port:createSocialPort(discord.client,accepts),status:registry,canDispatch});
+  const socialStage:MessageStage=async(message,disposition)=>{const current=disposition??{kind:'allow'};await social.process(message,current);return current;};
+  const socialScheduler=createScheduler(logger);let socialActive=false,removeSocialTimer=()=>{};
+  const recoverSocial=async()=>{const guilds=await db.query<{id:string}>('SELECT id FROM guilds WHERE active AND bot_present');for(const guild of guilds.rows)if(socialActive&&await accepts(guild.id))await social.reconcile(guild.id);};
+  features.push({key:'social',async start(){socialActive=true;removeSocialTimer=socialScheduler.register('social-recovery',300000,recoverSocial);await recoverSocial();},async stop(){socialActive=false;removeSocialTimer();await socialScheduler.stop();}});
+  const autoThreads=createAutoThreadService({db,clock,port:createAutoThreadPort(discord.client,accepts),status:registry});
+  messageStages.push(async(message,disposition)=>{const current=disposition??{kind:'allow' as const};await autoThreads.process(message,current);return current;});
+  messageStages.push(socialStage);
+  const threadScheduler=createScheduler(logger);let threadActive=false,removeThreadRecovery=()=>{};
+  const recoverThreads=async()=>{const guilds=await db.query<{id:string}>('SELECT id FROM guilds WHERE active AND bot_present');for(const guild of guilds.rows)if(threadActive&&await accepts(guild.id))await autoThreads.reconcile(guild.id);};
+  features.push({key:'threads',async start(){threadActive=true;removeThreadRecovery=threadScheduler.register('auto-thread-recovery',300000,recoverThreads);await recoverThreads();},async stop(){threadActive=false;removeThreadRecovery();await threadScheduler.stop();}});
+  const starboard=createStarboardService({db,clock,port:createStarboardPort(discord.client,accepts),status:registry});const starboardScheduler=createScheduler(logger);let starboardActive=false,removeStarboardEvents=()=>{},removeStarboardTimer=()=>{};let starboardRun:Promise<void>|null=null;
+  const recoverStarboard=():Promise<void>=>{if(starboardRun)return starboardRun;starboardRun=(async()=>{const guilds=await db.query<{id:string}>('SELECT id FROM guilds WHERE active AND bot_present');for(const guild of guilds.rows)if(starboardActive&&await accepts(guild.id))await starboard.reconcile(guild.id);})().catch(()=>logger.error('Starboard reconciliation failed')).finally(()=>{starboardRun=null;});return starboardRun;};
+  const starboardReconnect=()=>{if(starboardActive)void recoverStarboard();};
+  features.push({key:'starboard',async start(){starboardActive=true;removeStarboardEvents=registerStarboardEvents(discord.client,starboard,accepts,logger);discord.client.on(Events.ClientReady,starboardReconnect);discord.client.on(Events.ShardResume,starboardReconnect);removeStarboardTimer=starboardScheduler.register('starboard-recovery',300000,recoverStarboard);await recoverStarboard();},async stop(){starboardActive=false;removeStarboardEvents();removeStarboardTimer();discord.client.off(Events.ClientReady,starboardReconnect);discord.client.off(Events.ShardResume,starboardReconnect);await starboardScheduler.stop();await starboardRun;}});
+  const suggestions=createSuggestionService({db,clock,port:createSuggestionPort(discord.client,accepts),status:registry});registerSuggestionCommands(router,suggestions);
+  const suggestionScheduler=createScheduler(logger);let suggestionActive=false,removeSuggestionRefresh=()=>{},removeSuggestionRecovery=()=>{};
+  const recoverSuggestions=async()=>{const guilds=await db.query<{id:string}>('SELECT id FROM guilds WHERE active AND bot_present');for(const guild of guilds.rows)if(suggestionActive&&await accepts(guild.id))await suggestions.recover(guild.id);};
+  features.push({key:'suggestions',async start(){suggestionActive=true;removeSuggestionRefresh=suggestionScheduler.register('suggestion-card-refresh',2000,async()=>{const guilds=await db.query<{id:string}>('SELECT id FROM guilds WHERE active AND bot_present');for(const guild of guilds.rows)if(suggestionActive&&await accepts(guild.id))await suggestions.flush(guild.id);});removeSuggestionRecovery=suggestionScheduler.register('suggestion-delivery-recovery',300000,recoverSuggestions);await recoverSuggestions();},async stop(){suggestionActive=false;removeSuggestionRefresh();removeSuggestionRecovery();await suggestionScheduler.stop();}});
+  const voiceRepository=createVoiceRepository(db,clock),voicePort=createVoicePort(discord.client,accepts),voiceHubs=createVoiceHubService({settings:createSettingsService(db,clock),repository:voiceRepository,port:voicePort,status:registry}),voiceRecovery=createVoiceRecovery({repository:voiceRepository,port:voicePort,status:registry}),voiceControls=createVoiceControlService({repository:voiceRepository,port:voicePort,status:registry});
+  registerVoiceControls(router,voiceControls,voiceRepository,voicePort);
+  const voiceScheduler=createScheduler(logger);let voiceActive=false,removeVoiceEvents=()=>{},removeVoiceTimer=()=>{};let voiceRun:Promise<void>|null=null;
+  const recoverVoice=():Promise<void>=>{if(voiceRun)return voiceRun;voiceRun=(async()=>{const guilds=await db.query<{id:string}>('SELECT id FROM guilds WHERE active AND bot_present');for(const guild of guilds.rows)if(voiceActive&&await accepts(guild.id))await voiceRecovery.reconcile(guild.id);})().catch(()=>logger.error('Voice recovery failed')).finally(()=>{voiceRun=null;});return voiceRun;};
+  const voiceReconnect=()=>{if(voiceActive)void recoverVoice();};
+  features.push({key:'voice',async start(){voiceActive=true;removeVoiceEvents=registerVoiceEvents(discord.client,voiceHubs,accepts,logger);discord.client.on(Events.ClientReady,voiceReconnect);discord.client.on(Events.ShardResume,voiceReconnect);removeVoiceTimer=voiceScheduler.register('voice-recovery',300000,recoverVoice);await recoverVoice();},async stop(){voiceActive=false;removeVoiceEvents();removeVoiceTimer();discord.client.off(Events.ClientReady,voiceReconnect);discord.client.off(Events.ShardResume,voiceReconnect);await voiceScheduler.stop();await voiceRun;}});
+  const greetingDeliveries=createGreetingDeliveryStore(db,clock),greetings=createGreetingService({settings:createSettingsService(db,clock),deliveries:greetingDeliveries,port:createGreetingPort(discord.client,accepts),status:registry});
+  let removeGreetings=()=>{},removeGreetingPruning=()=>{};features.push({key:'greetings',async start(){removeGreetings=registerGreetingEvents(discord.client,greetings,accepts,logger);removeGreetingPruning=pruneScheduler.register('greeting-pruning',60000,async()=>{await greetingDeliveries.prune(1000);});},async stop(){removeGreetings();removeGreetingPruning();}});
+  const rolePickers=createRolePickerService({db,clock,port:createRolesPort(discord.client,accepts),status:registry});
+  registerRolePickerCommands(router,rolePickers);
+  const verificationRepository=createVerificationRepository(db,clock);
+  const verification=createVerificationService({repository:verificationRepository,port:createVerificationPort(discord.client,accepts),clock,status:registry});
+  registerVerificationCommands(router,verification,verificationRepository);
+  const verificationScheduler=createScheduler(logger);let verificationActive=false,removeVerificationEvents=()=>{},removeVerificationTimer=()=>{};let verificationRun:Promise<void>|null=null;
+  const reconcileVerification=():Promise<void>=>{
+   if(verificationRun)return verificationRun;
+   verificationRun=(async()=>{const guilds=await db.query<{id:string}>('SELECT id FROM guilds WHERE active AND bot_present');for(const guild of guilds.rows)if(verificationActive&&await accepts(guild.id))await verification.reconcile(guild.id);})().catch(()=>logger.error('Verification reconciliation failed')).finally(()=>{verificationRun=null;});return verificationRun;
+  };
+  const verificationReconnect=()=>{if(verificationActive)void reconcileVerification();};
+  features.push({key:'verification',async start(){verificationActive=true;removeVerificationEvents=registerVerificationEvents(discord.client,verification,accepts,logger);discord.client.on(Events.ClientReady,verificationReconnect);discord.client.on(Events.ShardResume,verificationReconnect);removeVerificationTimer=verificationScheduler.register('verification-reconciliation',300000,reconcileVerification);await reconcileVerification();},async stop(){verificationActive=false;removeVerificationEvents();removeVerificationTimer();discord.client.off(Events.ClientReady,verificationReconnect);discord.client.off(Events.ShardResume,verificationReconnect);await verificationScheduler.stop();await verificationRun;}});
+  const runtime=createRuntime({clock,status,logger,lease:createWorkerLease(db),discord,features,
+    http:{async start(){await new Promise<void>((resolve,reject)=>{server.once('error',reject);server.listen(env.port,'0.0.0.0',()=>{server.removeListener('error',reject);resolve();});});},async stop(){server.closeIdleConnections();await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}},
+    database:{async probe(signal){signal.throwIfAborted();const client=await db.pool.connect();try{const query={text:'SELECT 1',query_timeout:2000};await client.query(query);}finally{client.release();}},async compatible(){try{const row=await db.query<{hash:string}>('SELECT hash FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 1');return row.rows[0]?.hash===readMigrationFiles({migrationsFolder}).at(-1)?.hash;}catch{return false;}},close:()=>db.close()},
+  });
+  return {runtime,app,db,status,registry,discord,directory,router,messageStages,features,accepts,enforcement,moderationPort,relatedMessages,verification};
+}
+
+
+
+

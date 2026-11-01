@@ -1,0 +1,7 @@
+import {useQuery} from '@tanstack/react-query';
+import {casePageSchema} from '@eousbot/contracts';
+import {api} from '@/lib/api';
+import {Card,CardHeader,CardTitle,CardDescription,CardContent} from '@/components/ui/card';
+import {Badge} from '@/components/ui/badge';
+import {Button} from '@/components/ui/button';
+export function RuleActivity({guildId}:{guildId:string}){const query=useQuery({queryKey:['guilds',guildId,'cases','rule-activity'],queryFn:()=>api.get('/api/guilds/'+guildId+'/cases?source=channel_rule&limit=5',casePageSchema)});return <Card><CardHeader><CardTitle>Recent rule activity</CardTitle><CardDescription>Actual recorded outcomes, including remaining work cancelled by a changed rule.</CardDescription></CardHeader><CardContent className="flex flex-col gap-4"><Button variant="outline" onClick={()=>void query.refetch()}>Refresh rule activity</Button>{query.error?<p role="alert">{query.error.message}</p>:query.data?.items.length===0?<p className="text-muted-foreground">No rule incidents have been recorded.</p>:query.data?.items.map(item=><div key={item.id} className="flex flex-wrap items-center gap-3"><span>Case #{item.number}</span><Badge variant="outline">{item.outcome?.state==='cancelled'?'Cancelled':item.outcome?.state??'Pending'}</Badge><span className="text-muted-foreground">{item.outcome?.cancellation?.reason??item.reason}</span></div>)}</CardContent></Card>;}

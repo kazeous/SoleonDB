@@ -3,21 +3,50 @@
   "version": "0.1.0",
   "description": "Modular multi-purpose Discord bot with a glassmorphic web dashboard.",
   "type": "module",
-  "main": "src/index.js",
+  "main": "apps/server/dist/main.js",
   "scripts": {
-    "start": "node src/index.js",
-    "test": "node --test"
+    "start": "node --env-file-if-exists=.env apps/server/dist/main.js",
+    "test": "npm run test:unit",
+    "start:legacy": "node src/index.js",
+    "test:legacy": "node --test \"test/*.test.js\"",
+    "test:unit": "vitest run --project unit",
+    "typecheck": "npm run build -w @eousbot/contracts && npm run typecheck --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present",
+    "test:integration": "vitest run --project integration",
+    "db:generate": "node scripts/generate-migrations.mjs",
+    "db:migrate": "node apps/server/dist/ops/migrate.js",
+    "dev:server": "npm run build -w @eousbot/server && node --env-file-if-exists=.env apps/server/dist/main.js",
+    "commands:deploy": "node --env-file-if-exists=.env apps/server/dist/discord/deploy-commands.js",
+    "test:e2e": "e2e run",
+    "smoke": "node apps/server/dist/ops/smoke.js",
+    "check": "npm run typecheck && npm run test:unit && npm run test:integration && npm run test:legacy && npm run build && npm run test:e2e && npm audit --omit=dev"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=24.22.2 <25"
   },
   "dependencies": {
     "cookie-parser": "^1.4.7",
-    "discord.js": "14.26.4",
+    "discord.js": "14.28.0",
     "dotenv": "16.4.5",
-    "express": "^5.2.1"
+    "express": "5.3.0"
   },
-  "overrides": {
-    "undici": "6.27.0"
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "devDependencies": {
+    "@e2e-dev/web": "0.15.4",
+    "@types/express": "5.0.6",
+    "@types/express-session": "1.19.0",
+    "@types/node": "24.19.2",
+    "@types/pg": "8.23.1",
+    "@types/supertest": "7.2.1",
+    "drizzle-kit": "0.31.11",
+    "e2e": "0.22.0",
+    "playwright-core": "1.64.1",
+    "supertest": "7.3.1",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2",
+    "vitest": "5.0.5"
   }
 }

@@ -1,0 +1,10 @@
+import {sql} from 'drizzle-orm';
+import {pgTable,text,uuid,integer,bigint,boolean,primaryKey,foreignKey,unique,uniqueIndex,index} from 'drizzle-orm/pg-core';
+import {guilds,guildChannels} from '../../guilds/schema.js';
+export const verificationPanels=pgTable('verification_panels',{
+ guildId:text('guild_id').notNull().references(()=>guilds.id),generation:integer('generation').notNull(),channelId:text('channel_id').notNull(),roleId:text('role_id').notNull(),emojiKey:text('emoji_key').notNull(),emojiRender:text('emoji_render').notNull(),messageId:text('message_id'),active:boolean('active').notNull().default(false),state:text('state').notNull(),operationId:uuid('operation_id').notNull(),createdBy:text('created_by'),createdAt:bigint('created_at',{mode:'number'}).notNull(),
+},t=>[primaryKey({columns:[t.guildId,t.generation]}),unique('verification_message_identity').on(t.guildId,t.messageId),unique('verification_generation_role').on(t.guildId,t.generation,t.roleId),uniqueIndex('verification_active_panel').on(t.guildId).where(sql.raw('active')),foreignKey({columns:[t.guildId,t.channelId],foreignColumns:[guildChannels.guildId,guildChannels.id]})]);
+export const verificationAssignments=pgTable('verification_assignments',{
+ guildId:text('guild_id').notNull(),generation:integer('generation').notNull(),userId:text('user_id').notNull(),roleId:text('role_id').notNull(),normal:boolean('normal').notNull(),burst:boolean('burst').notNull(),roleGranted:boolean('role_granted').notNull(),botGranted:boolean('bot_granted').notNull(),priorRole:boolean('prior_role').notNull(),retiredEligible:boolean('retired_eligible').notNull(),operation:text('operation').notNull(),transferRoleId:text('transfer_role_id'),updatedAt:bigint('updated_at',{mode:'number'}).notNull(),
+},t=>[primaryKey({columns:[t.guildId,t.generation,t.userId]}),foreignKey({columns:[t.guildId,t.generation,t.roleId],foreignColumns:[verificationPanels.guildId,verificationPanels.generation,verificationPanels.roleId]}),index('verification_member_assignments').on(t.guildId,t.userId)]);
+

@@ -1,0 +1,10 @@
+import type {UseFormReturn} from 'react-hook-form';
+import {useId} from 'react';
+import {Field,FieldLabel,FieldDescription} from '@/components/ui/field';
+import {Input} from '@/components/ui/input';
+import {Textarea} from '@/components/ui/textarea';
+import {Switch} from '@/components/ui/switch';
+import {ToggleGroup,ToggleGroupItem} from '@/components/ui/toggle-group';
+export function TextField({form,name,label,description,multiline=false,type='text'}:{form:UseFormReturn<any>;name:string;label:string;description?:string;multiline?:boolean;type?:string}){const id=useId(),state=form.getFieldState(name,form.formState);return <Field data-invalid={!!state.error}><FieldLabel htmlFor={id}>{label}</FieldLabel>{multiline?<Textarea id={id} aria-invalid={!!state.error} {...form.register(name)}/>:<Input type={type} id={id} aria-invalid={!!state.error} {...form.register(name,type==='number'?{setValueAs:value=>value===''?NaN:Number(value)}:{})}/>}<FieldDescription>{state.error?.message??description}</FieldDescription></Field>;}
+export function Flag({form,name,label,description}:{form:UseFormReturn<any>;name:string;label:string;description?:string}){const id=useId();return <Field orientation="horizontal"><Switch id={id} checked={!!form.watch(name)} onCheckedChange={v=>form.setValue(name,v,{shouldDirty:true})}/><div><FieldLabel htmlFor={id}>{label}</FieldLabel>{description&&<FieldDescription>{description}</FieldDescription>}</div></Field>;}
+export function ActionFields({form}:{form:UseFormReturn<any>}){const kind=form.watch('action.kind');return <><Field><FieldLabel>Selected action</FieldLabel><ToggleGroup value={[kind]} variant="outline" onValueChange={values=>{if(values[0])form.setValue('action',values[0]==='timeout'?{kind:'timeout',durationSeconds:600}:{kind:values[0]},{shouldDirty:true});}}>{['timeout','kick','ban'].map(value=><ToggleGroupItem key={value} value={value}>{value==='timeout'?'Timeout':value==='kick'?'Kick':'Ban'}</ToggleGroupItem>)}</ToggleGroup></Field>{kind==='timeout'&&<TextField form={form} name="action.durationSeconds" label="Timeout duration (seconds)" type="number"/>}</>;}

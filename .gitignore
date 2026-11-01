@@ -3,3 +3,15 @@ node_modules/
 .env
 npm-debug.log*
 data/
+
+# Local rebuild documentation and agent instructions
+/docs/
+/AGENTS.md
+
+# Rebuild generated artifacts
+dist/
+coverage/
+.vitest/
+.e2e/
+*.tsbuildinfo
+

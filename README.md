@@ -1,108 +1,71 @@
 # Eousbot
 
-Eousbot is a modular Discord community bot with an authenticated web dashboard. It combines social-link embed conversion, moderation, AutoMod, onboarding, community utilities, productivity commands, and content feeds.
+A TypeScript Discord community bot with isolated PostgreSQL state for multiple servers and an owner-only web dashboard. The replacement is built and tested locally; production deployment and live Discord acceptance are separate release gates.
 
-## Features
+## Runtime and setup
 
-- Social link conversion for X/Twitter, Instagram, TikTok, and Reddit, scoped to an explicit channel allowlist.
-- Slash commands for suggestions, summaries, role pickers, verification setup, and moderation.
-- Moderation case logging, warnings, timeouts, kicks, bans, and message cleanup.
-- AutoMod for spam, caps, invite/link blocking, banned words, and escalation.
-- Starboard, join-to-create voice rooms with an in-channel control panel, auto-threading, greetings, and self-service roles.
-- Reddit, YouTube, Twitch, and RSS feed polling.
-- Discord OAuth dashboard with CSRF protection and an administrator ID allowlist.
+Use Node **24.22.2 or a newer patched Node 24**, PostgreSQL 17, and the committed npm lockfile. The container pins Node 24.22.2 by digest, verified against the [official release](https://nodejs.org/en/blog/release/v24.22.2). Copy `.env.example` into a local, ignored `.env` and set the bot/OAuth credentials, one `OWNER_DISCORD_ID`, a random session secret of at least 32 characters, an explicit `DATABASE_URL`, and the exact OAuth callback.
 
-## Requirements
-
-- Node.js 20 or newer.
-- A Discord application and bot token.
-- Message Content, Guild Members, Guild Message Reactions, Guild Presences, and Guild Voice States intents when the corresponding features are enabled. Guild Presences is needed only for the voice-room “use current game as name” action.
-
-## Local setup
-
-```bash
+```sh
 npm ci
-cp .env.example .env
-# edit .env
-npm test
+npm run build
+# Supply DATABASE_URL explicitly to the migration process; it reads no .env file.
+npm run db:migrate
 npm start
 ```
 
-The bot creates a `data/` directory at runtime. It contains non-secret settings, moderation cases, recorded dynamic voice channels, and starboard mappings. Credentials are read from environment variables and are never written to `data/settings.json`.
+`npm start` connects the replacement bot to Discord. Command registration is an explicit operation, never a startup side effect:
 
-The container starts as root only long enough to repair ownership of a mounted `/app/data` volume, then drops to the unprivileged `node` user before starting the application. This allows existing Coolify volumes created by older root-running images to be migrated safely.
-
-## Environment variables
-
-| Variable | Required | Default | Purpose |
-| --- | --- | --- | --- |
-| `DISCORD_TOKEN` | Yes | — | Bot token. |
-| `DISCORD_CLIENT_ID` | For dashboard | — | Discord OAuth application client ID. |
-| `DISCORD_CLIENT_SECRET` | For dashboard | — | Discord OAuth application secret. |
-| `ADMIN_DISCORD_IDS` | For dashboard | — | Comma-separated Discord user IDs allowed into the dashboard. |
-| `DASHBOARD_REDIRECT_URI` | No | `http://localhost:3000/api/auth/discord/callback` | OAuth callback; register the exact value in Discord. |
-| `HEALTH_PORT` | No | `3000` | Dashboard and `/health` port. |
-| `NODE_ENV` | No | — | Set to `production` to enable secure cookies. |
-| `SOCIAL_EMBEDS_ENABLED` | No | `false` | Enable social-link conversion. Requires watched channels. |
-| `TARGET_CHANNEL_IDS` | When social embeds are enabled | — | Comma-separated channel IDs. An empty list disables link processing. `TARGET_CHANNEL_ID` is accepted for compatibility. |
-| `REPLACEMENT_DOMAIN` | No | `fxtwitter.com` | X/Twitter replacement hostname. |
-| `DELETE_ORIGINAL` | No | `false` | Delete only messages that contain no attachment, sticker, or reply context. |
-| `USE_WEBHOOK` | No | `false` | Repost social links through a channel webhook. |
-| `INCLUDE_ORIGINAL_AUTHOR` | No | `true` | Mention the original author when posting as the bot. |
-| `SUMMARIZER_ENABLED` | No | `true` | Enable `/summarize` and the message context summary command. |
-| `CODE_HELPER_ENABLED` | No | `false` | Enable unformatted-code prompts. |
-| `GEMINI_API_KEY` | No | — | Optional summary provider. |
-| `OPENAI_API_KEY` | No | — | Optional summary fallback provider. |
-| `VOICE_HUB_CHANNEL_IDS` | No | — | Enables voice hubs from environment configuration. |
-| `VOICE_HUB_ROOM_FORMAT` | No | `Voice - {user}` | Dynamic voice room name template. Every room also receives a control panel in its built-in text chat. |
-| `STARBOARD_CHANNEL_ID` | No | — | Enables starboard in this channel. |
-| `STARBOARD_THRESHOLD` | No | `3` | Stars required. |
-| `SUGGESTION_CHANNEL_ID` | No | — | Enables `/suggest` in this channel. |
-| `AUTO_THREAD_CHANNEL_IDS` | No | — | Enables auto-threading in these channels. |
-| `VERIFIED_ROLE_ID` | No | — | Enables self-service verification. |
-| `WELCOME_CHANNEL_ID` | No | — | Optional verification welcome channel. |
-| `VERIFICATION_PROMPT` | No | Built-in prompt | Verification card text. |
-| `MOD_LOG_CHANNEL_ID` | No | — | Moderation case log channel. |
-| `GREETING_JOIN_CHANNEL_ID` | No | — | Join announcement channel. |
-| `GREETING_LEAVE_CHANNEL_ID` | No | — | Leave announcement channel. |
-| `GREETING_JOIN_MSG` | No | Built-in message | Join template. |
-| `GREETING_LEAVE_MSG` | No | Built-in message | Leave template. |
-| `GREETING_JOIN_DM` | No | Built-in message | Join DM template. |
-| `TWITCH_CLIENT_ID` | For Twitch feeds | — | Twitch API client ID. |
-| `TWITCH_CLIENT_SECRET` | For Twitch feeds | — | Twitch API client secret. |
-
-RSS feed URLs are restricted to credential-free HTTP(S) URLs and private/local addresses are blocked. Feed configuration is available from the dashboard.
-
-When an AI key is configured, `/summarize` sends the selected recent Discord message text to that provider. Do not enable an external provider for channels whose content cannot leave your organization.
-
-## Discord permissions
-
-Grant only the permissions required by enabled features. Moderation requires the relevant moderation permissions; social deletion requires Manage Messages; webhook reposting requires Manage Webhooks; role pickers and verification require Manage Roles; voice hubs require Manage Channels, Manage Roles (for per-user and per-role overwrites), Move Members, Create Instant Invite (for the invite action), and View Channel, Send Messages, and Read Message History in the voice channel’s text chat. Enable the Set Voice Channel Status permission if the Discord permission UI exposes it. Feeds and greetings require View Channel and Send Messages in their destinations.
-
-Place the bot role above roles it must assign or moderate. The verification flow is self-service form gating, not CAPTCHA or moderator approval.
-
-### Join-to-create voice room controls
-
-When a member joins a configured `VOICE_HUB_CHANNEL_IDS` channel, the bot creates a temporary voice room, moves the member into it, and posts a control panel in that room’s text chat. The room owner and server members with Manage Channels can use the panel. Controls include:
-
-- Channel settings: rename, user limit (0–99), voice status, current-game channel name, “Looking for teammates” status, bitrate, RTC region, text-chat toggle, NSFW toggle, and category-permission inheritance.
-- Channel permissions: lock/unlock joining, allow or deny a specific user or role, create a one-use invite for a user, hide/un-hide the room, and transfer ownership.
-
-Ownership is stored in `data/dynamic-voice-channels.json` so a restart does not silently change who controls a room. Legacy rooms without an owner remain manageable by administrators until they are deleted. The bot never grants owners Manage Channels; it enforces ownership in the interaction handler and grants only the channel-specific overwrites needed for access.
-
-Discord voice channels expose one 500-character voice status. The status and looking-for-teammates actions update that status, while the game action renames the room from the owner’s visible activity. The text-chat action controls the `Send Messages` overwrite for `@everyone` while preserving the owner’s access.
-
-## Dashboard security
-
-The dashboard is protected by Discord OAuth, `ADMIN_DISCORD_IDS`, an OAuth state nonce, HTTP-only session cookies, per-session CSRF tokens, and security response headers. Keep it behind HTTPS in production and register the exact HTTPS redirect URI.
-
-Dashboard settings are schema-validated. The dashboard cannot change bot credentials, OAuth credentials, administrator IDs, or the listening port. Existing legacy settings files are migrated to remove persisted secrets.
-
-## Development checks
-
-```bash
-npm test
-npm audit --omit=dev
+```sh
+npm run commands:deploy -- --guild YOUR_DISPOSABLE_GUILD_ID
+# After review, deploy to the explicitly activated guilds:
+npm run commands:deploy -- --activated-guilds
 ```
 
-There is no Discord integration test environment in this repository, so validate enabled features in a disposable server before production use.
+Sign in to the dashboard with the configured owner. The selector shows eligible servers where the bot is present and you own the server or have Manage Server; historical records remain readable. Activate each server explicitly, then configure its features. Saves are revision checked and apply only to that server. OAuth uses only identity scope; PostgreSQL stores hashed session IDs, absolute session expiry, OAuth state and CSRF protection. Production needs HTTPS and an exact matching callback URL. Set `TRUSTED_PROXY_CIDRS` to the real Coolify proxy network.
+
+## Supported workflows
+
+| Area | Behavior and setup |
+| --- | --- |
+| Social embeds | X/Twitter, Instagram posts/reels, TikTok and Reddit rewrites in selected channels. Custom replacement hostnames, optional author attribution/webhooks, and safe original deletion. Attachments, stickers and replies retain their originals; channel rules retain originals until threshold cleanup. |
+| Moderator commands | `/warn`, `/timeout`, `/kick`, `/ban`, `/cases`, `/clean`. Current invoker permissions and Discord hierarchy apply. Mute means Timeout. Cleanup supports bot/human/link/invite/text/member filters. |
+| Channel protection | Any message, mention categories, links or photos; configurable count and rolling window; one Timeout, Kick or Ban action. No cleanup below threshold. Combined rules choose the strongest action and union of matching messages. A 30-second cooldown suppresses punishment only. Rule revision, disablement and exemptions cancel remaining queued work; already sent requests cannot be recalled. |
+| General AutoMod | Spam, excessive capitals, banned words, invites and links, violation thresholds and explicit exemptions. Enabled channel rules override it in those channels. Administrators and moderators are checked unless explicitly exempted. |
+| Verification | Save the message channel, emoji and dedicated verified role, then use `/verifysetup`. Adding the designated reaction grants the role; removing it removes the bot-owned assignment. Replacement generations require explicit acknowledgment and re-verification. Disabling pauses changes while preserving roles. |
+| Role pickers | Save assignable, non-privileged roles, then `/rolepicker create` posts a persistent panel with up to five choices. Verification roles cannot be used. |
+| Voice rooms | Join a configured hub to create a room with recorded ownership and a persistent in-channel panel. Owner or current Manage Channels members can rename, set limit/status/current game/LFG/bitrate/region/text/NSFW/category inheritance, lock/unlock, allow/deny users or roles, create one-use invites, hide/unhide, and transfer ownership. Only recorded empty rooms are removed. |
+| Suggestions | `/suggest` creates persistent up/down voting and optional discussion threads. Moderators use `/suggestion status` to record a status and reason. |
+| Starboard | Distinct human ⭐ reactions excluding the author; updates/removal when stars, source or destination change. |
+| Auto threads | One thread for new human messages in selected text channels, with configurable archive duration. Messages selected for deletion are skipped. |
+| Greetings | Join/leave announcements and optional welcome DMs. Templates support `{user}`, `{username}`, `{server}`. Blocked DMs do not prevent channel delivery. |
+| Feeds | Independent Reddit, YouTube, Twitch and RSS/Atom subscriptions, destinations and intervals. First poll sets a baseline. Stable item IDs, backoff and recovery prevent blind reposts. Reddit needs an approved OAuth application; Twitch needs app credentials. Configurable feeds reject private/credential URLs and validate DNS and redirects. |
+| Summaries | `/summarize` and the Summarize Discussion message menu inspect recent visible human history. Default is an honest local activity digest. External OpenAI/Gemini calls need a deployment key, explicit supported model, provider selection, external enablement and an allowed channel. Keys alone never opt channels in; failures return a labeled local digest. No transcript is persisted. |
+| Code helper | Selected channels receive bounded formatting prompts. Only the original author can format within 60 seconds. The source is fetched again; originals remain. Long or hostile-fence snippets become plain-text attachments. |
+| Cat facts | `/catfact` uses the existing public provider with a deadline and useful failures, without a fabricated retrieved fact. |
+| Dashboard | Overview, complete feature setup, channel rules and read-only case history. No punishment, punishment retry or case-edit API/UI. Case details separate cleanup from punishment and preserve blocked/unknown/cancelled outcomes. |
+
+## Intents and permissions
+
+Enable Guild Members, Guild Messages, Guild Message Reactions and Guild Voice States. Enable Message Content in both deployment configuration and Discord's developer portal for message inspection, social rewrites, summaries and code detection. Guild Presences is optional and needed for the voice current-game action. The application requests these explicitly; missing intent access or permissions must appear as setup/degraded state.
+
+Grant only required permissions. Text destinations need View Channel, Read Message History, Send Messages and, for cards, Embed Links. Moderation needs Manage Messages and the selected Moderate Members/Kick Members/Ban Members permission. Role features need Manage Roles with the bot above assignable non-privileged roles. Voice controls need Manage Channels, Manage Roles for permission overwrites, Move Members, Connect, Send Messages, Read Message History, Create Instant Invite for invites, and voice-status permission where exposed. Threads need Create Public Threads and Send Messages in Threads. Long code copies need Attach Files. Discord hierarchy and target restrictions are rechecked for each action; blocked actions are recorded without escalation.
+
+## Checks and operations
+
+```powershell
+docker compose -f compose.test.yml up -d --wait postgres
+$endpoint = docker compose -f compose.test.yml port postgres 5432
+$env:TEST_DATABASE_URL = 'postgresql://eousbot_test:local-disposable-test@' + $endpoint.Trim() + '/eousbot_test'
+npx @e2e-dev/web install chromium
+npm run check
+docker build -t eousbot:review .
+```
+
+`check` runs typecheck, unit, disposable-schema integration, legacy regression, production build, deterministic browser checks and production dependency audit, stopping on the first failure. Browser tests use the real API/database with injected OAuth/Discord ports confined to test source; no model key or human Discord automation is needed. Missing database/browser access fails a check. CI runs the same command with Node 24.22.2 and PostgreSQL 17. The browser engine pins `playwright-core` to the exact required version.
+
+`/health` is process liveness; `/ready` requires a fresh database/schema probe, Discord connection and the active worker lease. Coolify restart health uses `/health` with 30s interval, 5s timeout, 3 retries, 60s start period. External availability monitoring uses `/ready`. Optional provider outages degrade their feature while process health remains independent. No external monitor is created by this repository.
+
+See [deployment and rollback](ops/deploy.md), [backup/restore](ops/deploy.md#backups-and-restore-drills), and [acceptance evidence](ops/acceptance.md). Logs omit credentials, code and summary transcripts. One worker owns the PostgreSQL lease; shutdown drains bounded jobs and releases it. Use stop-before-start releases, never concurrent legacy/replacement workers with the same token.
+
+The original JavaScript remains under `src/`, with an explicit `npm run start:legacy` entry point. Existing JSON/runtime data is preserved and is not migrated into the replacement. Legacy startup connects Discord and registers commands; it is not a routine test. The replacement image contains compiled replacement artifacts only and needs no writable JSON volume. Local `docs/` and root `AGENTS.md` remain ignored and are excluded from images.

@@ -1,0 +1,11 @@
+import {it,expect,vi} from 'vitest';
+import {randomUUID} from 'node:crypto';
+import supertest from 'supertest';
+import {withTestDb,seedGuild} from './database.js';
+import {httpFixture} from './http-fixtures.js';
+import {fakeClock} from './clock.js';
+import {createStatus,FeatureStatusRegistry} from '../src/core/status.js';
+import {createSettingsService} from '../src/guilds/settings.js';
+import {createFeedProviders} from '../src/features/feeds/providers/index.js';
+import {createFeedDelivery} from '../src/features/feeds/delivery.js';
+it.each(['unavailable','setup'])('provider %s degrades the feed while real health/readiness remain healthy',kind=>withTestDb(async db=>{const guild='9223372036854775807',channel='111111111111111111',owner='123456789012345678',clock=fakeClock(1000),status=createStatus(clock),registry=new FeatureStatusRegistry(clock);status.setInitialized(true);status.setSchema(true);status.setWorker(true);status.setDiscord(true);status.recordProbe(true);const http=httpFixture(db,status);await seedGuild(db,guild);await db.query('INSERT INTO guild_channels(guild_id,id,name,type) VALUES($1,$2,$3,$4)',[guild,channel,'feeds','text']);const id=randomUUID();await createSettingsService(db,clock).update(guild,'feeds',{enabled:true,subscriptions:[{id,enabled:true,channelId:channel,pollSeconds:120,source:kind==='setup'?{provider:'twitch',login:'streamer'}:{provider:'rss',url:'https://feeds.example/feed.xml'}}]},0,owner);const fetcher=vi.fn(async()=>({url:'https://feeds.example/feed.xml',status:503,headers:new Headers(),text:'Unavailable'})),providers=createFeedProviders({fetchPublicText:fetcher,clock,credentials:{twitchClientId:'',twitchClientSecret:'',redditClientId:'',redditClientSecret:'',redditUserAgent:''}}),port={destination:async()=>true,send:vi.fn(async()=> '222222222222222222'),findAccepted:async()=>null},delivery=createFeedDelivery({db,clock,providers,port,status:registry});await supertest(http.app).get('/ready').expect(200);expect((await delivery.run(id)).state).toBe('degraded');expect(registry.list(guild)).toContainEqual(expect.objectContaining({key:'feeds',state:kind==='setup'?'needs_setup':'degraded'}));await supertest(http.app).get('/ready').expect(200,{status:'ok'});await supertest(http.app).get('/health').expect(200,{status:'ok'});expect(port.send).not.toHaveBeenCalled();}));
