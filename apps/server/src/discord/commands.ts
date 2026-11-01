@@ -26,3 +26,4 @@ commandDefinitions.push(new SlashCommandBuilder().setName('suggestion').setDescr
 
 commandDefinitions.push(new SlashCommandBuilder().setName('summarize').setDescription('Summarize the recent visible conversation in this channel').addIntegerOption(option=>option.setName('limit').setDescription('Recent messages to inspect (default 50)').setMinValue(10).setMaxValue(100)).toJSON());
 commandDefinitions.push(new ContextMenuCommandBuilder().setName('Summarize Discussion').setType(ApplicationCommandType.Message).toJSON());
+commandDefinitions.push(new SlashCommandBuilder().setName('catfact').setDescription('Get a cat fact from the public cat fact provider').toJSON());

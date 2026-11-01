@@ -1,3 +1,4 @@
+import {registerCatFactCommand} from './features/cat-facts/commands.js';
 import {createCodeHelperRepository} from './features/code-helper/repository.js';
 import {createCodeHelperService} from './features/code-helper/service.js';
 import {createCodeHelperPort} from './features/code-helper/discord.js';
@@ -121,6 +122,7 @@ export function bootstrap(env:RuntimeEnv) {
   const codeHelperScheduler=createScheduler(logger);let codeHelperActive=false,removeCodeHelperTimer=()=>{};
   const reconcileCodeHelper=async()=>{const guilds=await db.query<{id:string}>('SELECT id FROM guilds WHERE active AND bot_present');for(const guild of guilds.rows)if(codeHelperActive&&await accepts(guild.id))await codeHelper.reconcile(guild.id);};
   features.push({key:'productivity',async start(){codeHelperActive=true;removeCodeHelperTimer=codeHelperScheduler.register('code-helper-expiry',15000,reconcileCodeHelper);await reconcileCodeHelper();},async stop(){codeHelperActive=false;removeCodeHelperTimer();await codeHelperScheduler.stop();}});
+  registerCatFactCommand(router,fetchPublicText);
   const summaries=createSummaryService({settings:createSettingsService(db,clock),port:createSummaryPort(discord.client,accepts,{messageContentEnabled:env.enableMessageContent}),providers:createSummaryProviders({fetchPublicText,config:env.summaryProviderConfig}),logger,status:registry});registerSummaryCommands(router,summaries);
   const feeds=createFeedDelivery({db,clock,providers:createFeedProviders({fetchPublicText,clock,credentials:env.feedCredentials}),port:createFeedPort(discord.client,accepts),status:registry,canDispatch});features.push(createFeedScheduler({db,clock,logger,delivery:feeds,canRun:canDispatch}));
   const social=createSocialService({db,clock,port:createSocialPort(discord.client,accepts),status:registry,canDispatch});
@@ -168,4 +170,5 @@ export function bootstrap(env:RuntimeEnv) {
   });
   return {runtime,app,db,status,registry,discord,directory,router,messageStages,features,accepts,enforcement,moderationPort,relatedMessages,verification};
 }
+
 
