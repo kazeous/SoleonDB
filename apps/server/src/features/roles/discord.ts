@@ -23,7 +23,7 @@ export function createRolesPort(client:Client,canOperate:(guildId:string)=>Promi
   async memberRoleState(guildId,userId){const guild=await guard(guildId),member=await guild.members.fetch({user:userId,force:true});return {roleIds:[...member.roles.cache.keys()],isBot:member.user.bot};},
   async postPanel(guildId,channelId,operationId,input){const destination=await channel(guildId,channelId);await guard(guildId);return (await destination.send(buildRolePickerPayload(operationId,input))).id;},
   async findPanel(guildId,channelId,operationId){const recent=await (await channel(guildId,channelId)).messages.fetch({limit:100});return recent.find(message=>message.author.id===client.user?.id&&!message.webhookId&&message.embeds.some(embed=>embed.footer?.text==='role-picker:'+operationId))?.id??null;},
-  async fetchPanel(guildId,channelId,messageId){try{const message=await (await channel(guildId,channelId)).messages.fetch(messageId);return message.guildId===guildId&&message.author.id===client.user?.id&&!message.webhookId;}catch(error){const code=error&&typeof error==='object'&&'code' in error?Number(error.code):0;if(code===10008||code===10003)return false;throw error;}},
+  async fetchPanel(guildId,channelId,messageId){try{const message=await (await channel(guildId,channelId)).messages.fetch({message:messageId,force:true});return message.guildId===guildId&&message.author.id===client.user?.id&&!message.webhookId;}catch(error){const code=error&&typeof error==='object'&&'code' in error?Number(error.code):0;if(code===10008||code===10003)return false;throw error;}},
   addRole:(guildId,userId,roleId)=>change(guildId,userId,roleId,true),removeRole:(guildId,userId,roleId)=>change(guildId,userId,roleId,false),
  };
 }
