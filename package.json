@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "description": "Modular multi-purpose Discord bot with a glassmorphic web dashboard.",
   "type": "module",
-  "main": "src/index.js",
+  "main": "apps/server/dist/main.js",
   "scripts": {
-    "start": "node src/index.js",
+    "start": "node --env-file-if-exists=.env apps/server/dist/main.js",
     "test": "npm run test:unit",
     "start:legacy": "node src/index.js",
     "test:legacy": "node --test \"test/*.test.js\"",
@@ -14,13 +14,15 @@
     "build": "npm run build --workspaces --if-present",
     "test:integration": "vitest run --project integration",
     "db:generate": "node scripts/generate-migrations.mjs",
-    "db:migrate": "node apps/server/dist/db/migrate.js",
+    "db:migrate": "node apps/server/dist/ops/migrate.js",
     "dev:server": "npm run build -w @eousbot/server && node --env-file-if-exists=.env apps/server/dist/main.js",
     "commands:deploy": "node --env-file-if-exists=.env apps/server/dist/discord/deploy-commands.js",
-    "test:e2e": "e2e run"
+    "test:e2e": "e2e run",
+    "smoke": "node apps/server/dist/ops/smoke.js",
+    "check": "npm run typecheck && npm run test:unit && npm run test:integration && npm run test:legacy && npm run build && npm run test:e2e && npm audit --omit=dev"
   },
   "engines": {
-    "node": ">=24 <25"
+    "node": ">=24.22.2 <25"
   },
   "dependencies": {
     "cookie-parser": "^1.4.7",
