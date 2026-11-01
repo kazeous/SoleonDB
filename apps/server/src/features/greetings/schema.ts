@@ -1,0 +1,4 @@
+import {pgTable,text,bigint,primaryKey,index} from 'drizzle-orm/pg-core';
+import {guilds} from '../../guilds/schema.js';
+export const greetingDeliveries=pgTable('greeting_deliveries',{guildId:text('guild_id').notNull().references(()=>guilds.id),eventKey:text('event_key').notNull(),target:text('target').notNull(),state:text('state').notNull(),messageId:text('message_id'),createdAt:bigint('created_at',{mode:'number'}).notNull()},t=>[primaryKey({columns:[t.guildId,t.eventKey,t.target]}),index('greeting_delivery_expiry').on(t.createdAt)]);
+export const greetingMemberships=pgTable('greeting_memberships',{guildId:text('guild_id').notNull().references(()=>guilds.id),userId:text('user_id').notNull(),eventKey:text('event_key').notNull(),state:text('state').notNull(),updatedAt:bigint('updated_at',{mode:'number'}).notNull()},t=>[primaryKey({columns:[t.guildId,t.userId]})]);

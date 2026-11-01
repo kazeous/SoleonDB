@@ -1,3 +1,6 @@
+import {createSettingsService} from './guilds/settings.js';
+import {createGreetingService,createGreetingDeliveryStore} from './features/greetings/service.js';
+import {createGreetingPort,registerGreetingEvents} from './features/greetings/discord.js';
 import {createRolePickerService} from './features/roles/service.js';
 import {createRolesPort} from './features/roles/discord.js';
 import {registerRolePickerCommands} from './features/roles/commands.js';
@@ -83,6 +86,8 @@ export function bootstrap(env:RuntimeEnv) {
   discord.client.on(Events.MessageCreate,message=>{void messageHandler(message).catch(()=>{if(message.guildId)registry.set(message.guildId,'moderation','degraded','Message data or processing unavailable');logger.error({guildId:message.guildId},'Message handler failed');});});
   discord.client.on(Events.MessageUpdate,(_old,message)=>{void messageHandler(message).catch(()=>logger.error({guildId:message.guildId},'Message edit handler failed'));});
   discord.client.on(Events.GuildDelete,guild=>{void db.query('UPDATE guilds SET active=false,bot_present=false WHERE id=$1',[guild.id]).catch(()=>logger.error({guildId:guild.id},'Guild removal persistence failed'));});
+  const greetingDeliveries=createGreetingDeliveryStore(db,clock),greetings=createGreetingService({settings:createSettingsService(db,clock),deliveries:greetingDeliveries,port:createGreetingPort(discord.client,accepts),status:registry});
+  let removeGreetings=()=>{},removeGreetingPruning=()=>{};features.push({key:'greetings',async start(){removeGreetings=registerGreetingEvents(discord.client,greetings,accepts,logger);removeGreetingPruning=pruneScheduler.register('greeting-pruning',60000,async()=>{await greetingDeliveries.prune(1000);});},async stop(){removeGreetings();removeGreetingPruning();}});
   const rolePickers=createRolePickerService({db,clock,port:createRolesPort(discord.client,accepts),status:registry});
   registerRolePickerCommands(router,rolePickers);
   const verificationRepository=createVerificationRepository(db,clock);
