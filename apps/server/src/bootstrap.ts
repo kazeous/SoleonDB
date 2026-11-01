@@ -1,3 +1,5 @@
+import {createAutoThreadService} from './features/threads/service.js';
+import {createAutoThreadPort} from './features/threads/discord.js';
 import {createStarboardService} from './features/starboard/service.js';
 import {createStarboardPort,registerStarboardEvents} from './features/starboard/discord.js';
 import {createSuggestionService} from './features/suggestions/service.js';
@@ -98,6 +100,11 @@ export function bootstrap(env:RuntimeEnv) {
   discord.client.on(Events.MessageCreate,message=>{void messageHandler(message).catch(()=>{if(message.guildId)registry.set(message.guildId,'moderation','degraded','Message data or processing unavailable');logger.error({guildId:message.guildId},'Message handler failed');});});
   discord.client.on(Events.MessageUpdate,(_old,message)=>{void messageHandler(message).catch(()=>logger.error({guildId:message.guildId},'Message edit handler failed'));});
   discord.client.on(Events.GuildDelete,guild=>{void db.query('UPDATE guilds SET active=false,bot_present=false WHERE id=$1',[guild.id]).catch(()=>logger.error({guildId:guild.id},'Guild removal persistence failed'));});
+  const autoThreads=createAutoThreadService({db,clock,port:createAutoThreadPort(discord.client,accepts),status:registry});
+  messageStages.push(async(message,disposition)=>{const current=disposition??{kind:'allow' as const};await autoThreads.process(message,current);return current;});
+  const threadScheduler=createScheduler(logger);let threadActive=false,removeThreadRecovery=()=>{};
+  const recoverThreads=async()=>{const guilds=await db.query<{id:string}>('SELECT id FROM guilds WHERE active AND bot_present');for(const guild of guilds.rows)if(threadActive&&await accepts(guild.id))await autoThreads.reconcile(guild.id);};
+  features.push({key:'threads',async start(){threadActive=true;removeThreadRecovery=threadScheduler.register('auto-thread-recovery',300000,recoverThreads);await recoverThreads();},async stop(){threadActive=false;removeThreadRecovery();await threadScheduler.stop();}});
   const starboard=createStarboardService({db,clock,port:createStarboardPort(discord.client,accepts),status:registry});const starboardScheduler=createScheduler(logger);let starboardActive=false,removeStarboardEvents=()=>{},removeStarboardTimer=()=>{};let starboardRun:Promise<void>|null=null;
   const recoverStarboard=():Promise<void>=>{if(starboardRun)return starboardRun;starboardRun=(async()=>{const guilds=await db.query<{id:string}>('SELECT id FROM guilds WHERE active AND bot_present');for(const guild of guilds.rows)if(starboardActive&&await accepts(guild.id))await starboard.reconcile(guild.id);})().catch(()=>logger.error('Starboard reconciliation failed')).finally(()=>{starboardRun=null;});return starboardRun;};
   const starboardReconnect=()=>{if(starboardActive)void recoverStarboard();};
