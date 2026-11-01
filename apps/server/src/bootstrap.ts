@@ -1,3 +1,4 @@
+import {createStatusInspection} from './discord/status.js';
 import {fileURLToPath} from 'node:url';
 import {registerDashboard} from './http/dashboard.js';
 import {registerCatFactCommand} from './features/cat-facts/commands.js';
@@ -95,7 +96,7 @@ export function bootstrap(env:RuntimeEnv) {
   registerModerationCommands(router,{authority:commandAuthority,actions:moderationActions,cases:createCaseRepository(db),clean:cleanService});
   const recovery=createRecoveryService({db,clock,port:moderationPort});
   features.push(createIncidentWorker({db,clock,logger,enforcement,recovery,canRun:canDispatch}));
-  const app=createHttpApp({env,db,clock,logger,directory,oauth:createOAuth(env),status});registerDashboard(app,fileURLToPath(new URL('../../dashboard/dist',import.meta.url)));const server=createServer(app);
+  const app=createHttpApp({inspection:createStatusInspection(discord.client),featureStatus:registry,env,db,clock,logger,directory,oauth:createOAuth(env),status});registerDashboard(app,fileURLToPath(new URL('../../dashboard/dist',import.meta.url)));const server=createServer(app);
   db.pool.on('error',()=>{status.recordProbe(false);logger.error('Database connection failed');});
   async function accepts(guildId:string):Promise<boolean> {
     if(status.ready().status!==200)return false;
@@ -172,6 +173,7 @@ export function bootstrap(env:RuntimeEnv) {
   });
   return {runtime,app,db,status,registry,discord,directory,router,messageStages,features,accepts,enforcement,moderationPort,relatedMessages,verification};
 }
+
 
 
 

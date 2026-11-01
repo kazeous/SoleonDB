@@ -1,0 +1,7 @@
+import type {ModerationCase} from '@eousbot/contracts';
+import {Table,TableHeader,TableHead,TableBody,TableRow,TableCell} from '@/components/ui/table';
+import {Button} from '@/components/ui/button';
+import {Badge} from '@/components/ui/badge';
+import {DialogTrigger} from '@/components/ui/dialog';
+import {capitalize,sourceLabel} from './filters';
+export function CaseTable({items,onSelect}:{items:ModerationCase[];onSelect:(item:ModerationCase)=>void}){return <Table><TableHeader><TableRow><TableHead>Case</TableHead><TableHead>Member</TableHead><TableHead>Action / source</TableHead><TableHead>Outcome</TableHead><TableHead>Date</TableHead><TableHead>Details</TableHead></TableRow></TableHeader><TableBody>{items.map(item=><TableRow key={item.id} data-case-id={item.id}><TableCell>#{item.number}</TableCell><TableCell>{item.targetId}</TableCell><TableCell>{capitalize(item.action??'Cleanup')}<br/><span className="text-xs text-muted-foreground">{sourceLabel(item.source)}</span></TableCell><TableCell><Badge data-outcome={item.outcome?.state??'pending'} variant={item.outcome?.state==='succeeded'?'default':'outline'}>{capitalize(item.outcome?.state??'pending')}</Badge></TableCell><TableCell>{new Date(item.createdAt).toLocaleString()}</TableCell><TableCell><DialogTrigger render={<Button variant="outline" size="sm" onClick={()=>onSelect(item)}/>}>View case #{item.number}</DialogTrigger></TableCell></TableRow>)}</TableBody></Table>;}

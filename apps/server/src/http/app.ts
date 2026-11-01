@@ -1,3 +1,6 @@
+import {registerStatusRoutes} from './status.js';
+import type {StatusInspectionPort} from './status.js';
+import type {RuntimeStatus,FeatureStatusRegistry} from '../core/status.js';
 import {registerFeedStatusRoutes} from '../features/feeds/routes.js';
 import express from 'express';
 import {registerCaseRoutes} from '../features/moderation/routes.js';
@@ -17,8 +20,8 @@ import {registerAuthRoutes} from '../auth/routes.js';
 import {registerGuildRoutes} from '../guilds/routes.js';
 import {errorHandler} from './error-handler.js';
 import {AppError} from '../core/errors.js';
-export interface HealthReader {health():{status:number;body:unknown};ready():{status:number;body:unknown}}
-export interface HttpDeps {env:RuntimeEnv;db:AppDb;clock:Clock;logger:Logger;directory:GuildDirectory;oauth:OAuthPort;status:HealthReader}
+export interface HealthReader {snapshot?:RuntimeStatus['snapshot'];dependenciesHealthy?:()=>boolean;health():{status:number;body:unknown};ready():{status:number;body:unknown}}
+export interface HttpDeps {inspection?:StatusInspectionPort;featureStatus?:FeatureStatusRegistry;env:RuntimeEnv;db:AppDb;clock:Clock;logger:Logger;directory:GuildDirectory;oauth:OAuthPort;status:HealthReader}
 export function createHttpApp(deps:HttpDeps):Express {
   const app=express();app.disable('x-powered-by');app.set('trust proxy',deps.env.trustedProxyCidrs);
   app.use((_req,res,next)=>{
@@ -32,6 +35,7 @@ export function createHttpApp(deps:HttpDeps):Express {
   registerAuthRoutes(app,deps);
   app.use('/api',requireOwner(deps),requireCsrf(deps.env));
   registerGuildRoutes(app,deps);
+  registerStatusRoutes(app,deps);
   registerFeedStatusRoutes(app,deps);
   registerProtectionRoutes(app,deps);
   registerCaseRoutes(app,deps);
@@ -39,5 +43,6 @@ export function createHttpApp(deps:HttpDeps):Express {
   app.use(errorHandler(deps.logger));
   return app;
 }
+
 
 
