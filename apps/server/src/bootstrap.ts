@@ -1,4 +1,8 @@
 import {createServer} from 'node:http';
+import {createProtectionEngine} from './features/protection/engine.js';
+import {createObservationRepository} from './features/protection/observations.js';
+import {registerPruning} from './db/pruning.js';
+import {createScheduler} from './jobs/scheduler.js';
 import {Events} from 'discord.js';
 import type {RuntimeEnv} from './core/env.js';
 import {createClock} from './core/clock.js';
@@ -22,6 +26,10 @@ export function bootstrap(env:RuntimeEnv) {
   const db=createDb(env.databaseUrl),discord=createDiscordClient(env,status),directory=createGuildDirectory(discord.client),router=createCommandRouter([]);
   const messageStages:MessageStage[]=[],features:FeatureModule[]=[];
   const pipeline=createMessagePipeline(messageStages);
+  const protection=createProtectionEngine(db,clock),observationStore=createObservationRepository(db),pruneScheduler=createScheduler(logger);
+  messageStages.push(message=>protection.observe(message));
+  let unregisterPruning=()=>{};
+  features.push({key:'moderation',async start(){unregisterPruning=registerPruning(pruneScheduler,[limit=>observationStore.prune(clock.now(),limit)]);},async stop(){unregisterPruning();await pruneScheduler.stop();}});
   const app=createHttpApp({env,db,clock,logger,directory,oauth:createOAuth(env),status});const server=createServer(app);
   db.pool.on('error',()=>{status.recordProbe(false);logger.error('Database connection failed');});
   async function accepts(guildId:string):Promise<boolean> {
