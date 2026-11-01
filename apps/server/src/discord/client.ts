@@ -53,6 +53,7 @@ export async function interactionContext(interaction:Interaction):Promise<Comman
   return {id:interaction.id,name:'commandName' in interaction?interaction.commandName:interaction.customId,kind,guildId:interaction.guildId,channelId:interaction.channelId,userId:interaction.user.id,member,options,...('message' in interaction&&interaction.message?{messageId:interaction.message.id}:{}),
     async reply(text){if(interaction.deferred||interaction.replied)await interaction.editReply({content:text,allowedMentions:{parse:[]}});else await interaction.reply({content:text,flags:MessageFlags.Ephemeral,allowedMentions:{parse:[]}});},
     async defer(){if(!interaction.deferred&&!interaction.replied)await interaction.deferReply({flags:MessageFlags.Ephemeral});},
+    async followUp(text){await interaction.followUp({content:text,flags:MessageFlags.Ephemeral,allowedMentions:{parse:[]}});},
     async edit(text){await interaction.editReply({content:text,allowedMentions:{parse:[]}});},
   };
 }

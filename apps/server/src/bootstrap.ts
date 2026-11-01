@@ -1,3 +1,7 @@
+import {createSummaryService} from './features/summaries/service.js';
+import {createSummaryProviders} from './features/summaries/providers.js';
+import {createSummaryPort} from './features/summaries/discord.js';
+import {registerSummaryCommands} from './features/summaries/commands.js';
 import {createFeedProviders} from './features/feeds/providers/index.js';
 import {createFeedDelivery} from './features/feeds/delivery.js';
 import {createFeedPort} from './features/feeds/discord.js';
@@ -108,6 +112,7 @@ export function bootstrap(env:RuntimeEnv) {
   discord.client.on(Events.MessageCreate,message=>{void messageHandler(message).catch(()=>{if(message.guildId)registry.set(message.guildId,'moderation','degraded','Message data or processing unavailable');logger.error({guildId:message.guildId},'Message handler failed');});});
   discord.client.on(Events.MessageUpdate,(_old,message)=>{void messageHandler(message).catch(()=>logger.error({guildId:message.guildId},'Message edit handler failed'));});
   discord.client.on(Events.GuildDelete,guild=>{void db.query('UPDATE guilds SET active=false,bot_present=false WHERE id=$1',[guild.id]).catch(()=>logger.error({guildId:guild.id},'Guild removal persistence failed'));});
+  const summaries=createSummaryService({settings:createSettingsService(db,clock),port:createSummaryPort(discord.client,accepts,{messageContentEnabled:env.enableMessageContent}),providers:createSummaryProviders({fetchPublicText,config:env.summaryProviderConfig}),logger,status:registry});registerSummaryCommands(router,summaries);
   const feeds=createFeedDelivery({db,clock,providers:createFeedProviders({fetchPublicText,clock,credentials:env.feedCredentials}),port:createFeedPort(discord.client,accepts),status:registry,canDispatch});features.push(createFeedScheduler({db,clock,logger,delivery:feeds,canRun:canDispatch}));
   const social=createSocialService({db,clock,port:createSocialPort(discord.client,accepts),status:registry,canDispatch});
   const socialStage:MessageStage=async(message,disposition)=>{const current=disposition??{kind:'allow'};await social.process(message,current);return current;};

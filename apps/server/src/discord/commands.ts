@@ -1,4 +1,4 @@
-import {SlashCommandBuilder} from 'discord.js';
+import {SlashCommandBuilder,ContextMenuCommandBuilder,ApplicationCommandType} from 'discord.js';
 import type {RESTPostAPIApplicationCommandsJSONBody} from 'discord.js';
 import {requiredPermission} from '../features/moderation/commands.js';
 const moderation=['warn','timeout','kick','ban','cases','clean'] as const;
@@ -23,3 +23,6 @@ commandDefinitions.push(new SlashCommandBuilder().setName('rolepicker').setDescr
 }).toJSON());
 commandDefinitions.push(new SlashCommandBuilder().setName('suggest').setDescription('Submit an idea to this server suggestion board').addStringOption(option=>option.setName('title').setDescription('Short title').setRequired(true).setMaxLength(240)).addStringOption(option=>option.setName('description').setDescription('Explain your idea').setRequired(true).setMaxLength(3500)).toJSON());
 commandDefinitions.push(new SlashCommandBuilder().setName('suggestion').setDescription('Manage suggestion status').setDefaultMemberPermissions(8192n).addSubcommand(sub=>sub.setName('status').setDescription('Record a suggestion status and reason').addStringOption(option=>option.setName('message_id').setDescription('Registered suggestion message ID').setRequired(true)).addStringOption(option=>option.setName('status').setDescription('Status').setRequired(true).addChoices({name:'Voting',value:'voting'},{name:'Approved',value:'approved'},{name:'Rejected',value:'rejected'},{name:'In progress',value:'in_progress'},{name:'Implemented',value:'implemented'})).addStringOption(option=>option.setName('reason').setDescription('Reason for this decision').setMaxLength(1000))).toJSON());
+
+commandDefinitions.push(new SlashCommandBuilder().setName('summarize').setDescription('Summarize the recent visible conversation in this channel').addIntegerOption(option=>option.setName('limit').setDescription('Recent messages to inspect (default 50)').setMinValue(10).setMaxValue(100)).toJSON());
+commandDefinitions.push(new ContextMenuCommandBuilder().setName('Summarize Discussion').setType(ApplicationCommandType.Message).toJSON());

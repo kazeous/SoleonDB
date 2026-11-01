@@ -4,7 +4,7 @@ export interface CommandContext {
   id:string;name:string;kind:'command'|'context'|'component';
   guildId:string|null;channelId:string|null;userId:string|null;member:MemberRef|null;
   messageId?:string;options:Record<string,unknown>;
-  reply(text:string):Promise<void>;defer():Promise<void>;edit(text:string):Promise<void>;
+  followUp?(text:string):Promise<void>;reply(text:string):Promise<void>;defer():Promise<void>;edit(text:string):Promise<void>;
 }
 export type CommandHandler=(interaction:CommandContext)=>Promise<void>;
 export interface CommandRegistration {name:string;kind:CommandContext['kind'];handler:CommandHandler}
