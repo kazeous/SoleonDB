@@ -1,8 +1,11 @@
+import {AsyncLocalStorage} from 'node:async_hooks';
 import { Pool } from 'pg';
 import type { QueryResult,QueryResultRow } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from './schema.js';
+const transactionScope=new AsyncLocalStorage<boolean>();
+export function assertOutsideTransaction():void {if(transactionScope.getStore())throw new Error('Discord network work cannot run inside a SQL transaction');}
 export interface SqlSession {
   query<R extends QueryResultRow=QueryResultRow>(text:string,values?:unknown[]):Promise<QueryResult<R>>;
   orm:NodePgDatabase<typeof schema>;
@@ -12,7 +15,7 @@ export interface AppTx extends SqlSession { readonly inTransaction:true }
 export function createDb(databaseUrl:string,options:{schema?:string;max?:number}={}):AppDb {
   const schemaName=options.schema??'public';
   if(schemaName!=='public' && !/^eousbot_test_[a-f0-9]{24}$/.test(schemaName)) throw new Error('Invalid database schema');
-  const pool=new Pool({connectionString:databaseUrl,max:options.max??10,connectionTimeoutMillis:2000,options:'-c search_path='+schemaName+',public'});
+  const pool=new Pool({application_name:'eousbot-app-'+schemaName,connectionString:databaseUrl,max:options.max??10,connectionTimeoutMillis:2000,options:'-c search_path='+schemaName+',public'});
   return {pool,schemaName,orm:drizzle(pool,{schema}),query:(text,values)=>pool.query(text,values),close:()=>pool.end()};
 }
 export async function withTransaction<T>(db:AppDb,fn:(tx:AppTx)=>Promise<T>):Promise<T> {
@@ -20,7 +23,7 @@ export async function withTransaction<T>(db:AppDb,fn:(tx:AppTx)=>Promise<T>):Pro
   try {
     await client.query('BEGIN');
     const tx:AppTx={inTransaction:true,orm:drizzle(client,{schema}),query:(text,values)=>client.query(text,values)};
-    const result=await fn(tx);
+    const result=await transactionScope.run(true,()=>fn(tx));
     await client.query('COMMIT');
     return result;
   } catch(error) {

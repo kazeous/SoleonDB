@@ -5,10 +5,11 @@ export interface IncidentIntent {
  contributors:Array<{ruleId:string;revision:number;messageIds:string[]}>;
  cleanupMessages:Array<{channelId:string;messageId:string}>;createdAt:number;
  mode:'punish'|'cleanup_only';parentIncidentId:string|null;
- actorId?:string;reason?:string;ruleSnapshots?:ChannelRule[];
+ actorId?:string;reason?:string;ruleSnapshots?:ChannelRule[];requestedTimeoutUntil?:number;
 }
 export interface CaseOutcome {
  state:'succeeded'|'partial'|'blocked'|'failed'|'unknown'|'cancelled';
+ cancellation?:{reason:string};
  cleanup:{deleted:number;missing:number;failed:number};
  punishment:{state:'pending'|'succeeded'|'blocked'|'failed'|'unknown'|'cancelled'|'not_requested';reason?:string};
 }

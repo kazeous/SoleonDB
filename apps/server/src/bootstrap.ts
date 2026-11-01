@@ -1,4 +1,9 @@
 import {createServer} from 'node:http';
+import {createEnforcementService} from './features/moderation/enforcement.js';
+import {createRecoveryService} from './features/moderation/recovery.js';
+import {createCaseLogger} from './features/moderation/logging.js';
+import {createModerationPort,createModerationLogPort} from './discord/moderation.js';
+import {createIncidentWorker} from './jobs/incident-worker.js';
 import {createProtectionEngine} from './features/protection/engine.js';
 import {createObservationRepository} from './features/protection/observations.js';
 import {registerPruning} from './db/pruning.js';
@@ -30,6 +35,12 @@ export function bootstrap(env:RuntimeEnv) {
   messageStages.push(message=>protection.observe(message));
   let unregisterPruning=()=>{};
   features.push({key:'moderation',async start(){unregisterPruning=registerPruning(pruneScheduler,[limit=>observationStore.prune(clock.now(),limit)]);},async stop(){unregisterPruning();await pruneScheduler.stop();}});
+  const canDispatch=()=>status.ready().status===200;
+  const moderationPort=createModerationPort(discord.client,canDispatch);
+  const relatedMessages={async list(_guildId:string,_sourceMessageId:string):Promise<Array<{channelId:string;messageId:string}>>{return [];}};
+  const enforcement=createEnforcementService({db,clock,port:moderationPort,related:relatedMessages,canDispatch,log:createCaseLogger({db,logger,registry,port:createModerationLogPort(discord.client,canDispatch)})});
+  const recovery=createRecoveryService({db,clock,port:moderationPort});
+  features.push(createIncidentWorker({db,clock,logger,enforcement,recovery,canRun:canDispatch}));
   const app=createHttpApp({env,db,clock,logger,directory,oauth:createOAuth(env),status});const server=createServer(app);
   db.pool.on('error',()=>{status.recordProbe(false);logger.error('Database connection failed');});
   async function accepts(guildId:string):Promise<boolean> {
@@ -57,6 +68,6 @@ export function bootstrap(env:RuntimeEnv) {
     http:{async start(){await new Promise<void>((resolve,reject)=>{server.once('error',reject);server.listen(env.port,'0.0.0.0',()=>{server.removeListener('error',reject);resolve();});});},async stop(){server.closeIdleConnections();await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}},
     database:{async probe(signal){signal.throwIfAborted();const client=await db.pool.connect();try{const query={text:'SELECT 1',query_timeout:2000};await client.query(query);}finally{client.release();}},async compatible(){try{const row=await db.query<{hash:string}>('SELECT hash FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 1');return row.rows[0]?.hash===readMigrationFiles({migrationsFolder}).at(-1)?.hash;}catch{return false;}},close:()=>db.close()},
   });
-  return {runtime,app,db,status,registry,discord,directory,router,messageStages,features,accepts};
+  return {runtime,app,db,status,registry,discord,directory,router,messageStages,features,accepts,enforcement,moderationPort,relatedMessages};
 }
 
