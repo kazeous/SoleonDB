@@ -1,3 +1,9 @@
+import {createVoiceRepository} from './features/voice/repository.js';
+import {createVoiceHubService} from './features/voice/hubs.js';
+import {createVoiceRecovery} from './features/voice/recovery.js';
+import {createVoiceControlService} from './features/voice/controls.js';
+import {registerVoiceControls,handleVoicePrompt} from './features/voice/panel.js';
+import {createVoicePort,registerVoiceEvents} from './features/voice/discord.js';
 import {createSettingsService} from './guilds/settings.js';
 import {createGreetingService,createGreetingDeliveryStore} from './features/greetings/service.js';
 import {createGreetingPort,registerGreetingEvents} from './features/greetings/discord.js';
@@ -73,6 +79,7 @@ export function bootstrap(env:RuntimeEnv) {
   discord.client.on(Events.InteractionCreate,interaction=>{
     void (async()=>{
       if(!status.snapshot().worker)return;
+      if(await handleVoicePrompt(interaction,discord.client.user?.id))return;
       const context=await interactionContext(interaction);if(!context)return;
       if(!context.guildId||!await accepts(context.guildId)){await context.reply('This server is not activated or the bot is reconnecting.');return;}
       await router.dispatch(context);
@@ -86,6 +93,12 @@ export function bootstrap(env:RuntimeEnv) {
   discord.client.on(Events.MessageCreate,message=>{void messageHandler(message).catch(()=>{if(message.guildId)registry.set(message.guildId,'moderation','degraded','Message data or processing unavailable');logger.error({guildId:message.guildId},'Message handler failed');});});
   discord.client.on(Events.MessageUpdate,(_old,message)=>{void messageHandler(message).catch(()=>logger.error({guildId:message.guildId},'Message edit handler failed'));});
   discord.client.on(Events.GuildDelete,guild=>{void db.query('UPDATE guilds SET active=false,bot_present=false WHERE id=$1',[guild.id]).catch(()=>logger.error({guildId:guild.id},'Guild removal persistence failed'));});
+  const voiceRepository=createVoiceRepository(db,clock),voicePort=createVoicePort(discord.client,accepts),voiceHubs=createVoiceHubService({settings:createSettingsService(db,clock),repository:voiceRepository,port:voicePort,status:registry}),voiceRecovery=createVoiceRecovery({repository:voiceRepository,port:voicePort,status:registry}),voiceControls=createVoiceControlService({repository:voiceRepository,port:voicePort,status:registry});
+  registerVoiceControls(router,voiceControls,voiceRepository,voicePort);
+  const voiceScheduler=createScheduler(logger);let voiceActive=false,removeVoiceEvents=()=>{},removeVoiceTimer=()=>{};let voiceRun:Promise<void>|null=null;
+  const recoverVoice=():Promise<void>=>{if(voiceRun)return voiceRun;voiceRun=(async()=>{const guilds=await db.query<{id:string}>('SELECT id FROM guilds WHERE active AND bot_present');for(const guild of guilds.rows)if(voiceActive&&await accepts(guild.id))await voiceRecovery.reconcile(guild.id);})().catch(()=>logger.error('Voice recovery failed')).finally(()=>{voiceRun=null;});return voiceRun;};
+  const voiceReconnect=()=>{if(voiceActive)void recoverVoice();};
+  features.push({key:'voice',async start(){voiceActive=true;removeVoiceEvents=registerVoiceEvents(discord.client,voiceHubs,accepts,logger);discord.client.on(Events.ClientReady,voiceReconnect);discord.client.on(Events.ShardResume,voiceReconnect);removeVoiceTimer=voiceScheduler.register('voice-recovery',300000,recoverVoice);await recoverVoice();},async stop(){voiceActive=false;removeVoiceEvents();removeVoiceTimer();discord.client.off(Events.ClientReady,voiceReconnect);discord.client.off(Events.ShardResume,voiceReconnect);await voiceScheduler.stop();await voiceRun;}});
   const greetingDeliveries=createGreetingDeliveryStore(db,clock),greetings=createGreetingService({settings:createSettingsService(db,clock),deliveries:greetingDeliveries,port:createGreetingPort(discord.client,accepts),status:registry});
   let removeGreetings=()=>{},removeGreetingPruning=()=>{};features.push({key:'greetings',async start(){removeGreetings=registerGreetingEvents(discord.client,greetings,accepts,logger);removeGreetingPruning=pruneScheduler.register('greeting-pruning',60000,async()=>{await greetingDeliveries.prune(1000);});},async stop(){removeGreetings();removeGreetingPruning();}});
   const rolePickers=createRolePickerService({db,clock,port:createRolesPort(discord.client,accepts),status:registry});

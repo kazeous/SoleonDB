@@ -11,3 +11,4 @@ export * from './cases.js';
 export * from './verification.js';
 export * from './roles.js';
 export * from './greetings.js';
+export * from './voice.js';
