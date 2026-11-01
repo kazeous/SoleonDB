@@ -17,6 +17,7 @@ export function createGeneralAutoMod(db:AppDb,clock:Clock) {
    if(message.authorKind!=='human')return {kind:'allow'};
    return withTransaction(db,tx=>withMemberLock(tx,message.guildId,message.userId,async()=>{
     const guild=await tx.query('SELECT 1 FROM guilds WHERE id=$1 AND active AND bot_present',[message.guildId]);if(!guild.rowCount)return {kind:'allow'};
+    if((await tx.query('SELECT 1 FROM channel_rules WHERE guild_id=$1 AND channel_id=$2 AND enabled AND deleted_at IS NULL LIMIT 1',[message.guildId,message.channelId])).rowCount)return {kind:'held'};
     const stored=(await tx.query<{revision:number;value:unknown}>('SELECT revision,value FROM feature_settings WHERE guild_id=$1 AND feature=$2',[message.guildId,'automod'])).rows[0];
     const config=stored?automodConfigSchema.parse(stored.value):automodDefaults,revision=stored?.revision??0,now=clock.now();
     if(!config.enabled||config.exemptUserIds.includes(message.userId)||config.exemptRoleIds.some(id=>message.member.roleIds.includes(id)))return {kind:'allow'};
@@ -40,6 +41,7 @@ export function createGeneralAutoMod(db:AppDb,clock:Clock) {
 }
 export type GeneralAutoMod=ReturnType<typeof createGeneralAutoMod>;
 export function createProtectionStage(channel:ProtectionEngine,general:GeneralAutoMod,rules:RuleRepository):MessageStage {
- return async message=>await rules.hasEnabledInChannel(message.guildId,message.channelId)?channel.observe(message):general.evaluate(message);
+ return async message=>{if(await rules.hasEnabledInChannel(message.guildId,message.channelId))return channel.observe(message);const result=await general.evaluate(message);return result.kind==='held'?channel.observe(message):result;};
 }
+
 

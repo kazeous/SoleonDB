@@ -1,11 +1,11 @@
 import {AuditLogEvent,PermissionFlagsBits} from 'discord.js';
 import type {Client,Guild} from 'discord.js';
 import type {ModerationPort} from '../features/moderation/ports.js';
-import {ModerationEffectError} from '../features/moderation/ports.js';
+import {ModerationEffectError,ModerationSendCancelled} from '../features/moderation/ports.js';
 import {assertOutsideTransaction} from '../db/client.js';
 function errorCode(error:unknown):number|null {return error&&typeof error==='object'&&'code' in error&&typeof error.code==='number'?error.code:null;}
-function classify(error:unknown):ModerationEffectError {
- if(error instanceof ModerationEffectError)return error;
+function classify(error:unknown):ModerationEffectError|ModerationSendCancelled {
+ if(error instanceof ModerationEffectError||error instanceof ModerationSendCancelled)return error;
  const status=error&&typeof error==='object'&&'status' in error?Number(error.status):0;
  return new ModerationEffectError(status>=400&&status<500?'rejected':'unknown',status>=400&&status<500?'Discord rejected the request':'Discord request outcome unknown');
 }
@@ -19,11 +19,11 @@ export function createModerationPort(client:Client,canDispatch:()=>boolean):Mode
    const above=target?bot.roles.highest.comparePositionTo(target.roles.highest)>0:false;
    return {isOwner:current.ownerId===userId,isAdministrator:target?.permissions.has(PermissionFlagsBits.Administrator)??false,botCanTimeout:above&&bot.permissions.has(PermissionFlagsBits.ModerateMembers),botCanKick:above&&bot.permissions.has(PermissionFlagsBits.KickMembers),botCanBan:(above||!target)&&bot.permissions.has(PermissionFlagsBits.BanMembers),timeoutUntil:target?.communicationDisabledUntilTimestamp??null,roleIds:target?[...target.roles.cache.keys()]:[]};
   },
-  async timeout(guildId,userId,until,reason){guard();try{const target=await guild(guildId).members.fetch({user:userId,force:true});guard();await target.disableCommunicationUntil(until,reason);}catch(error){throw classify(error);}},
-  async kick(guildId,userId,reason){guard();try{const current=guild(guildId);guard();await current.members.kick(userId,reason);}catch(error){throw classify(error);}},
-  async ban(guildId,userId,reason){guard();try{const current=guild(guildId);guard();await current.members.ban(userId,{reason});}catch(error){throw classify(error);}},
-  async deleteMessage(guildId,channelId,messageId){
-   guard();try{const channel=await guild(guildId).channels.fetch(channelId);if(!channel||channel.guildId!==guildId||!channel.isTextBased())throw new ModerationEffectError('rejected','Message channel unavailable');guard();await channel.messages.delete(messageId);return 'deleted';}
+  async timeout(guildId,userId,until,reason,beforeSend){guard();try{const target=await guild(guildId).members.fetch({user:userId,force:true});if(beforeSend&&!await beforeSend())throw new ModerationSendCancelled();guard();await target.disableCommunicationUntil(until,reason);}catch(error){throw classify(error);}},
+  async kick(guildId,userId,reason,beforeSend){guard();try{const current=guild(guildId);if(beforeSend&&!await beforeSend())throw new ModerationSendCancelled();guard();await current.members.kick(userId,reason);}catch(error){throw classify(error);}},
+  async ban(guildId,userId,reason,beforeSend){guard();try{const current=guild(guildId);if(beforeSend&&!await beforeSend())throw new ModerationSendCancelled();guard();await current.members.ban(userId,{reason});}catch(error){throw classify(error);}},
+  async deleteMessage(guildId,channelId,messageId,beforeSend){
+   guard();try{const channel=await guild(guildId).channels.fetch(channelId);if(!channel||channel.guildId!==guildId||!channel.isTextBased())throw new ModerationEffectError('rejected','Message channel unavailable');if(beforeSend&&!await beforeSend())throw new ModerationSendCancelled();guard();await channel.messages.delete(messageId);return 'deleted';}
    catch(error){if(errorCode(error)===10008)return 'missing';throw classify(error);}
   },
   async lookupOutcome(intent){
@@ -47,4 +47,5 @@ export function createModerationLogPort(client:Client,canDispatch:()=>boolean) {
   await channel.send({content:text.slice(0,2000),allowedMentions:{parse:[]}});
  }};
 }
+
 

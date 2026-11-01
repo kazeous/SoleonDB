@@ -9,7 +9,7 @@ import {createRuleRepository} from '../protection/repository.js';
 import {createIncidentRepository} from './incidents.js';
 import type {IncidentIntent,CaseOutcome} from './incidents.js';
 import type {ModerationPort,RelatedMessageStore,TargetEligibility} from './ports.js';
-import {ModerationEffectError} from './ports.js';
+import {ModerationEffectError,ModerationSendCancelled} from './ports.js';
 import {readEffects,completeEffect,finishIncident} from './effects.js';
 import type {EffectRow} from './effects.js';
 export interface EnforcementDeps {db:AppDb;clock:Clock;port:ModerationPort;related:RelatedMessageStore;canDispatch?:()=>boolean;authorizeCommand?:(intent:IncidentIntent)=>Promise<void>;log?:(intent:IncidentIntent,outcome:CaseOutcome)=>Promise<void>}
@@ -37,6 +37,7 @@ export function createEnforcementService(deps:EnforcementDeps) {
    if(intent.source==='general_automod'){
     const stored=(await tx.query<{revision:number;value:unknown}>('SELECT revision,value FROM feature_settings WHERE guild_id=$1 AND feature=$2',[intent.guildId,'automod'])).rows[0];
     const config=stored?automodConfigSchema.parse(stored.value):null;
+    for(const channelId of new Set(intent.cleanupMessages.map(message=>message.channelId)))if((await tx.query('SELECT 1 FROM channel_rules WHERE guild_id=$1 AND channel_id=$2 AND enabled AND deleted_at IS NULL LIMIT 1',[intent.guildId,channelId])).rowCount)invalid=true;
     if(!config?.enabled||stored?.revision!==intent.settingsRevision||config.exemptUserIds.includes(intent.userId)||config.exemptRoleIds.some(id=>target.roleIds.includes(id)))invalid=true;
    }
    if(invalid){await tx.query("UPDATE incident_effects SET state='cancelled',reason=$3,completed_at=$4 WHERE guild_id=$1 AND incident_id=$2 AND state='pending'",[intent.guildId,intent.id,'Configuration changed or target became exempt before dispatch',clock.now()]);return [];}
@@ -45,46 +46,35 @@ export function createEnforcementService(deps:EnforcementDeps) {
    return (await tx.query<EffectRow>("UPDATE incident_effects SET state='dispatching',authorized_at=$4,request=$5 WHERE guild_id=$1 AND incident_id=$2 AND effect_key=ANY($3::text[]) AND state='pending' RETURNING *",[intent.guildId,intent.id,keys,clock.now(),request])).rows;
   }));
  }
+ function blockedTarget(intent:IncidentIntent,target:TargetEligibility):string|undefined{if(target.isOwner)return 'The server owner cannot be punished';if(intent.action?.kind==='timeout'&&target.isAdministrator)return 'Discord does not allow timeouts for administrators';if(intent.action?.kind==='timeout'&&!target.botCanTimeout)return 'Bot lacks timeout permission or role hierarchy';if(intent.action?.kind==='kick'&&!target.botCanKick)return 'Bot lacks kick permission or role hierarchy';if(intent.action?.kind==='ban'&&!target.botCanBan)return 'Bot lacks ban permission or role hierarchy';return undefined;}
  async function punish(intent:IncidentIntent,token:string){
-  const effect=(await readEffects(db,intent)).find(r=>r.effect_key==='punishment');if(!intent.action||effect?.state!=='pending')return;
-  if(intent.source==='command'&&deps.authorizeCommand){try{await deps.authorizeCommand(intent);}catch{await completeEffect(db,intent,'punishment','blocked',clock.now(),'Actor permission or hierarchy no longer allows this action');return;}}
-  let target:TargetEligibility;
-  try{target=await deadline(()=>port.inspect(intent.guildId,intent.userId));}catch {await completeEffect(db,intent,'punishment','failed',clock.now(),'Target permissions unavailable; no action sent');return;}
-  let blockedReason:string|undefined;
-  if(target.isOwner)blockedReason='The server owner cannot be punished';
-  else if(intent.action.kind==='timeout'&&target.isAdministrator)blockedReason='Discord does not allow timeouts for administrators';
-  else if(intent.action.kind==='timeout'&&!target.botCanTimeout)blockedReason='Bot lacks timeout permission or role hierarchy';
-  else if(intent.action.kind==='kick'&&!target.botCanKick)blockedReason='Bot lacks kick permission or role hierarchy';
-  else if(intent.action.kind==='ban'&&!target.botCanBan)blockedReason='Bot lacks ban permission or role hierarchy';
+  const effect=(await readEffects(db,intent)).find(row=>row.effect_key==='punishment');if(!intent.action||effect?.state!=='pending')return;
   const until=intent.action.kind==='timeout'?clock.now()+intent.action.durationSeconds*1000:undefined;
-  const skip=until!==undefined&&target.timeoutUntil!==null&&target.timeoutUntil>=until;
-  const request={...(until===undefined?{}:{until}),...(skip?{skip:true}:{}),...(blockedReason?{blockedReason}:{})};
-  if(!(await authorize(intent,token,['punishment'],target,request)).length)return;
-  if(blockedReason){await completeEffect(db,intent,'punishment','blocked',clock.now(),blockedReason);return;}
-  if(skip){await completeEffect(db,intent,'punishment','succeeded',clock.now(),'Existing timeout is at least as long; it was not shortened');return;}
-  const reason='[incident:'+intent.id+'] '+(intent.reason??'Channel protection threshold reached').slice(0,400);
-  let state='succeeded',failureReason:string|undefined;
-  try {
-   if(intent.action.kind==='timeout')await deadline(()=>port.timeout(intent.guildId,intent.userId,until!,reason));
-   else if(intent.action.kind==='kick')await deadline(()=>port.kick(intent.guildId,intent.userId,reason));
-   else await deadline(()=>port.ban(intent.guildId,intent.userId,reason));
-  }catch(error){state=error instanceof ModerationEffectError&&error.outcome==='rejected'?'failed':'unknown';failureReason=state==='unknown'?'Discord outcome is unknown; this punishment will not be blindly repeated':'Discord rejected this action';}
+  async function authorizePrepared():Promise<boolean>{
+   if(deps.canDispatch&&!deps.canDispatch())return false;
+   if(intent.source==='command'&&deps.authorizeCommand)try{await deps.authorizeCommand(intent);}catch{await completeEffect(db,intent,'punishment','blocked',clock.now(),'Actor permission or hierarchy no longer allows this action');return false;}
+   let target:TargetEligibility;try{target=await deadline(()=>port.inspect(intent.guildId,intent.userId));}catch{await completeEffect(db,intent,'punishment','failed',clock.now(),'Target permissions unavailable; no action sent');return false;}
+   const blockedReason=blockedTarget(intent,target),skip=until!==undefined&&target.timeoutUntil!==null&&target.timeoutUntil>=until,request={...(until===undefined?{}:{until}),...(skip?{skip:true}:{}),...(blockedReason?{blockedReason}:{})};
+   if(!(await authorize(intent,token,['punishment'],target,request)).length)return false;
+   if(blockedReason){await completeEffect(db,intent,'punishment','blocked',clock.now(),blockedReason);return false;}
+   if(skip){await completeEffect(db,intent,'punishment','succeeded',clock.now(),'Existing timeout is at least as long; it was not shortened');return false;}return true;
+  }
+  const reason='[incident:'+intent.id+'] '+(intent.reason??'Channel protection threshold reached').slice(0,400);let state='succeeded',failureReason:string|undefined;
+  try{if(intent.action.kind==='timeout')await deadline(()=>port.timeout(intent.guildId,intent.userId,until!,reason,authorizePrepared));else if(intent.action.kind==='kick')await deadline(()=>port.kick(intent.guildId,intent.userId,reason,authorizePrepared));else await deadline(()=>port.ban(intent.guildId,intent.userId,reason,authorizePrepared));}
+  catch(error){if(error instanceof ModerationSendCancelled)return;state=error instanceof ModerationEffectError&&error.outcome==='rejected'?'failed':'unknown';failureReason=state==='unknown'?'Discord outcome is unknown; this punishment will not be blindly repeated':'Discord rejected this action';}
   await completeEffect(db,intent,'punishment',state,clock.now(),failureReason);
  }
  async function cleanup(intent:IncidentIntent,token:string){
   while(true){
-   const pending=(await readEffects(db,intent)).filter(r=>r.kind==='cleanup'&&r.state==='pending').slice(0,5);if(!pending.length)return;
-   if(intent.source==='command'&&deps.authorizeCommand){try{await deps.authorizeCommand(intent);}catch{for(const effect of (await readEffects(db,intent)).filter(row=>row.kind==='cleanup'&&row.state==='pending'))await completeEffect(db,intent,effect.effect_key,'failed',clock.now(),'Actor no longer has cleanup permission');return;}}
-   let target:TargetEligibility;
-   try{target=await deadline(()=>port.inspect(intent.guildId,intent.userId));}catch {for(const effect of (await readEffects(db,intent)).filter(row=>row.kind==='cleanup'&&row.state==='pending'))await completeEffect(db,intent,effect.effect_key,'failed',clock.now(),'Target state unavailable; no deletion sent');return;}
-   const authorized=await authorize(intent,token,pending.map(e=>e.effect_key),target);if(!authorized.length)return;
-   const results=await Promise.allSettled(authorized.map(async effect=>{
+   if(deps.canDispatch&&!deps.canDispatch())return;
+   const pending=(await readEffects(db,intent)).filter(row=>row.kind==='cleanup'&&row.state==='pending').slice(0,5);if(!pending.length)return;
+   const results=await Promise.allSettled(pending.map(async effect=>{
+    async function authorizePrepared():Promise<boolean>{if(deps.canDispatch&&!deps.canDispatch())return false;if(intent.source==='command'&&deps.authorizeCommand)try{await deps.authorizeCommand(intent);}catch{await completeEffect(db,intent,effect.effect_key,'failed',clock.now(),'Actor no longer has cleanup permission');return false;}let target:TargetEligibility;try{target=await deadline(()=>port.inspect(intent.guildId,intent.userId));}catch{await completeEffect(db,intent,effect.effect_key,'failed',clock.now(),'Target state unavailable; no deletion sent');return false;}return (await authorize(intent,token,[effect.effect_key],target)).length>0;}
     let state:string,reason:string|undefined;
-    try{state=(await deadline(()=>port.deleteMessage(intent.guildId,effect.channel_id!,effect.message_id!)))==='missing'?'missing':'succeeded';}
-    catch(error){state=error instanceof ModerationEffectError&&error.outcome==='rejected'?'failed':'unknown';reason=state==='failed'?'Discord rejected message deletion':'Message deletion outcome unknown';}
+    try{state=(await deadline(()=>port.deleteMessage(intent.guildId,effect.channel_id!,effect.message_id!,authorizePrepared)))==='missing'?'missing':'succeeded';}
+    catch(error){if(error instanceof ModerationSendCancelled)return;state=error instanceof ModerationEffectError&&error.outcome==='rejected'?'failed':'unknown';reason=state==='failed'?'Discord rejected message deletion':'Message deletion outcome unknown';}
     await completeEffect(db,intent,effect.effect_key,state,clock.now(),reason);
-   }));
-   const failed=results.find(r=>r.status==='rejected');if(failed?.status==='rejected')throw failed.reason;
+   }));const failed=results.find(result=>result.status==='rejected');if(failed?.status==='rejected')throw failed.reason;
   }
  }
  async function run(id:string):Promise<CaseOutcome>{
@@ -100,4 +90,6 @@ export function createEnforcementService(deps:EnforcementDeps) {
  return {dispatch(id:string):Promise<CaseOutcome>{const existing=active.get(id);if(existing)return existing;const promise=run(id).finally(()=>active.delete(id));active.set(id,promise);return promise;}};
 }
 export type EnforcementService=ReturnType<typeof createEnforcementService>;
+
+
 
