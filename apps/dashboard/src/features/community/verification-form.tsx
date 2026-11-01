@@ -1,0 +1,7 @@
+import {useGuild} from '@/app/guild-context';
+import {SettingsPanel} from '@/components/settings-panel';
+import {DiscordChannelField} from '@/components/discord-channel-field';
+import {DiscordRoleField} from '@/components/discord-role-field';
+import {Flag,TextField} from '@/components/forms/fields';
+import {Alert,AlertTitle,AlertDescription} from '@/components/ui/alert';
+export function VerificationForm(){const {guildId}=useGuild();return <SettingsPanel guildId={guildId} feature="verification" title="Reaction verification" description="Adding the designated reaction grants the verified role. Removing that reaction removes it. Requires Manage Roles, Read Message History, Add Reactions, Send Messages and Embed Links." renderFields={form=><><Flag form={form} name="enabled" label="Enable reaction verification"/><DiscordChannelField {...{guildId,form}} name="channelId" label="Verification channel"/><DiscordRoleField {...{guildId,form}} name="roleId" label="Verified role"/><TextField form={form} name="emoji" label="Verification emoji"/><TextField form={form} name="prompt" label="Verification prompt" multiline/><Alert><AlertTitle>Save settings, then post in Discord</AlertTitle><AlertDescription>Use /verifysetup in the configured channel. Changing the role requires re-verification on a replacement panel; existing assignments are preserved until each member verifies again. Use the command's explicit replacement acknowledgment. Disabling pauses changes and preserves assigned roles.</AlertDescription></Alert></>}/>;}

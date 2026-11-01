@@ -1,3 +1,4 @@
+import {registerFeedStatusRoutes} from '../features/feeds/routes.js';
 import express from 'express';
 import {registerCaseRoutes} from '../features/moderation/routes.js';
 import {registerProtectionRoutes} from '../features/protection/routes.js';
@@ -31,10 +32,12 @@ export function createHttpApp(deps:HttpDeps):Express {
   registerAuthRoutes(app,deps);
   app.use('/api',requireOwner(deps),requireCsrf(deps.env));
   registerGuildRoutes(app,deps);
+  registerFeedStatusRoutes(app,deps);
   registerProtectionRoutes(app,deps);
   registerCaseRoutes(app,deps);
   app.use('/api',()=>{throw new AppError('not_found','API route not found');});
   app.use(errorHandler(deps.logger));
   return app;
 }
+
 

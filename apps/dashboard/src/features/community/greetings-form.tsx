@@ -1,0 +1,5 @@
+import {useGuild} from '@/app/guild-context';
+import {SettingsPanel} from '@/components/settings-panel';
+import {DiscordChannelField} from '@/components/discord-channel-field';
+import {Flag,TextField} from '@/components/forms/fields';
+export function GreetingsForm(){const {guildId}=useGuild();return <SettingsPanel guildId={guildId} feature="greetings" title="Greetings" description="Supported variables: {user}, {username}, {server}. Requires the Guild Members intent and Send Messages for channel greetings. Optional DMs can be blocked by a member's privacy settings." renderFields={form=><><Flag form={form} name="enabled" label="Enable greetings"/><DiscordChannelField {...{guildId,form}} name="joinChannelId" label="Join channel"/><TextField form={form} name="joinTemplate" label="Join template" multiline/><DiscordChannelField {...{guildId,form}} name="leaveChannelId" label="Leave channel"/><TextField form={form} name="leaveTemplate" label="Leave template" multiline/><Flag form={form} name="dmEnabled" label="Send welcome DMs"/><TextField form={form} name="dmTemplate" label="Welcome DM template" multiline/></>}/>;}

@@ -18,3 +18,4 @@ export const feedsDefaults:FeedsConfig={enabled:false,subscriptions:[]};
 export const feedItemSchema=z.strictObject({id:z.string().min(1).max(500),title:z.string().min(1).max(256),url:publicFeedUrlSchema,publishedAt:z.number().int().min(0).max(8640000000000000),description:z.string().max(2000).optional(),imageUrl:publicFeedUrlSchema.optional()});
 export type FeedItem=z.infer<typeof feedItemSchema>;
 export const feedPollResultSchema=z.strictObject({items:z.array(feedItemSchema).max(100),cursor:z.string().max(4096).nullable()});
+export const feedStatusSchema=z.strictObject({id:z.uuid(),generation:z.number().int(),state:z.enum(['disabled','waiting','ok','degraded','unknown']),lastSuccessAt:z.number().nullable(),nextPollAt:z.number(),unknownDeliveries:z.number().int().nonnegative()});
