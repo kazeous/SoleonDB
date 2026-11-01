@@ -1,0 +1,34 @@
+import {ChannelType,Events,ReactionType} from 'discord.js';
+import type {ClientEvents,Client,MessageReaction,PartialMessageReaction,Message,PartialMessage} from 'discord.js';
+import {assertOutsideTransaction} from '../../db/client.js';
+import {AppError} from '../../core/errors.js';
+import type {Logger} from '../../core/logger.js';
+import type {StarboardPort,StarboardSource,StarboardService} from './service.js';
+function missing(error:unknown){return error&&typeof error==='object'&&'code'in error&&(error.code===10008||error.code===10003);}
+export function buildStarboardPayload(operationId:string,source:StarboardSource,count:number){return {content:'⭐ **'+count+'** | <#'+source.channelId+'>',embeds:[{author:{name:source.authorName.slice(0,256),...(source.avatarUrl?{icon_url:source.avatarUrl}:{})},description:(source.content||'[No text content]').slice(0,4000),fields:[{name:'Jump link',value:'[Go to message](https://discord.com/channels/'+source.guildId+'/'+source.channelId+'/'+source.messageId+')'}],footer:{text:'starboard:'+operationId},...(source.imageUrl?{image:{url:source.imageUrl}}:{}),timestamp:new Date(source.createdAt).toISOString()}],allowedMentions:{parse:[] as never[]}};}
+export function createStarboardPort(client:Client,canOperate:(guildId:string)=>Promise<boolean>):StarboardPort{
+ async function guard(guildId:string){assertOutsideTransaction();if(!client.isReady()||!await canOperate(guildId))throw new AppError('unavailable','Starboard worker is not active');const guild=client.guilds.cache.get(guildId);if(!guild)throw new AppError('unavailable','Server unavailable');return guild;}
+ async function textChannel(guildId:string,channelId:string){const guild=await guard(guildId),value=await guild.channels.fetch(channelId);if(!value||value.guildId!==guildId||!value.isTextBased())throw new AppError('not_found','Starboard source is missing or inaccessible');return value;}
+ async function destination(guildId:string,channelId:string){const value=await textChannel(guildId,channelId);if(value.type!==ChannelType.GuildText&&value.type!==ChannelType.GuildAnnouncement)throw new AppError('validation','Select a text channel for starboard');return value;}
+ async function message(guildId:string,channelId:string,messageId:string){return (await textChannel(guildId,channelId)).messages.fetch(messageId);}
+ async function repost(guildId:string,channelId:string,messageId:string){const value=await (await destination(guildId,channelId)).messages.fetch(messageId);if(value.author.id!==client.user?.id||value.webhookId)throw new AppError('validation','Mapped starboard author is invalid');return value;}
+ return {
+  async source(guildId,channelId,messageId){try{const value=await message(guildId,channelId,messageId);return {guildId:value.guildId!,channelId:value.channelId,messageId:value.id,authorId:value.author.id,authorIsBot:value.author.bot||!!value.webhookId,authorName:value.member?.displayName??value.author.globalName??value.author.username,avatarUrl:value.author.displayAvatarURL({extension:'png'}),content:value.content,imageUrl:value.attachments.find(attachment=>attachment.contentType?.startsWith('image/'))?.url??null,createdAt:value.createdTimestamp};}catch(error){if(missing(error))return null;throw error;}},
+  async reactors(guildId,channelId,messageId,type,cursor){const value=await message(guildId,channelId,messageId),reaction=value.reactions.cache.find(item=>!item.emoji.id&&item.emoji.name?.replaceAll('\uFE0F','')==='⭐');if(!reaction)return {users:[],nextCursor:null};const users=await reaction.users.fetch({type:type==='normal'?ReactionType.Normal:ReactionType.Burst,limit:100,...(cursor?{after:cursor}:{})}),ids=[...users.keys()],last=ids.reduce<string|null>((max,id)=>max===null||BigInt(id)>BigInt(max)?id:max,null);return {users:[...users.values()].map(user=>({id:user.id,isBot:user.bot})),nextCursor:ids.length===100?last:null};},
+  async post(guildId,destinationId,operationId,source,count){const value=await destination(guildId,destinationId);await guard(guildId);return (await value.send({...buildStarboardPayload(operationId,source,count),nonce:operationId.replaceAll('-','').slice(0,24),enforceNonce:true})).id;},
+  async findPost(guildId,destinationId,operationId){const recent=await (await destination(guildId,destinationId)).messages.fetch({limit:100});return recent.find(value=>value.author.id===client.user?.id&&!value.webhookId&&value.embeds.some(embed=>embed.footer?.text==='starboard:'+operationId))?.id??null;},
+  async edit(guildId,destinationId,messageId,source,count,operationId){try{const value=await repost(guildId,destinationId,messageId);await guard(guildId);await value.edit(buildStarboardPayload(operationId,source,count));return true;}catch(error){if(missing(error))return false;throw error;}},
+  async remove(guildId,destinationId,messageId){try{const value=await repost(guildId,destinationId,messageId);await guard(guildId);await value.delete();}catch(error){if(!missing(error))throw error;}},
+ };
+}
+export function registerStarboardEvents(client:Client,service:StarboardService,canOperate:(guildId:string)=>Promise<boolean>,logger:Logger):()=>void{
+ const report=(work:Promise<void>)=>{void work.catch(()=>logger.error('Starboard event failed'));};
+ const reaction=(value:MessageReaction|PartialMessageReaction)=>{if(value.emoji.id||value.emoji.name?.replaceAll('\uFE0F','')!=='⭐')return;const message=value.message;if(message.guildId)report(canOperate(message.guildId).then(allowed=>allowed?service.sync(message.guildId!,message.channelId,message.id):undefined));};
+ const known=(message:Message|PartialMessage)=>{if(message.guildId)report(canOperate(message.guildId).then(allowed=>allowed?service.refreshKnown(message.guildId!,message.channelId,message.id):undefined));};
+ const removedAll=(message:Message|PartialMessage)=>{if(message.guildId)report(canOperate(message.guildId).then(allowed=>allowed?service.sync(message.guildId!,message.channelId,message.id):undefined));};
+ const updated=(_old:Message|PartialMessage,next:Message|PartialMessage)=>known(next);
+ const bulk=(messages:ClientEvents[Events.MessageBulkDelete][0])=>{for(const message of messages.values())known(message);};
+ client.on(Events.MessageReactionAdd,reaction);client.on(Events.MessageReactionRemove,reaction);client.on(Events.MessageReactionRemoveEmoji,reaction);client.on(Events.MessageReactionRemoveAll,removedAll);client.on(Events.MessageDelete,known);client.on(Events.MessageBulkDelete,bulk);client.on(Events.MessageUpdate,updated);
+ return ()=>{client.off(Events.MessageReactionAdd,reaction);client.off(Events.MessageReactionRemove,reaction);client.off(Events.MessageReactionRemoveEmoji,reaction);client.off(Events.MessageReactionRemoveAll,removedAll);client.off(Events.MessageDelete,known);client.off(Events.MessageBulkDelete,bulk);client.off(Events.MessageUpdate,updated);};
+}
+

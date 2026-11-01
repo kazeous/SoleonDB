@@ -1,3 +1,5 @@
+import {createStarboardService} from './features/starboard/service.js';
+import {createStarboardPort,registerStarboardEvents} from './features/starboard/discord.js';
 import {createSuggestionService} from './features/suggestions/service.js';
 import {createSuggestionPort} from './features/suggestions/discord.js';
 import {registerSuggestionCommands} from './features/suggestions/commands.js';
@@ -96,6 +98,10 @@ export function bootstrap(env:RuntimeEnv) {
   discord.client.on(Events.MessageCreate,message=>{void messageHandler(message).catch(()=>{if(message.guildId)registry.set(message.guildId,'moderation','degraded','Message data or processing unavailable');logger.error({guildId:message.guildId},'Message handler failed');});});
   discord.client.on(Events.MessageUpdate,(_old,message)=>{void messageHandler(message).catch(()=>logger.error({guildId:message.guildId},'Message edit handler failed'));});
   discord.client.on(Events.GuildDelete,guild=>{void db.query('UPDATE guilds SET active=false,bot_present=false WHERE id=$1',[guild.id]).catch(()=>logger.error({guildId:guild.id},'Guild removal persistence failed'));});
+  const starboard=createStarboardService({db,clock,port:createStarboardPort(discord.client,accepts),status:registry});const starboardScheduler=createScheduler(logger);let starboardActive=false,removeStarboardEvents=()=>{},removeStarboardTimer=()=>{};let starboardRun:Promise<void>|null=null;
+  const recoverStarboard=():Promise<void>=>{if(starboardRun)return starboardRun;starboardRun=(async()=>{const guilds=await db.query<{id:string}>('SELECT id FROM guilds WHERE active AND bot_present');for(const guild of guilds.rows)if(starboardActive&&await accepts(guild.id))await starboard.reconcile(guild.id);})().catch(()=>logger.error('Starboard reconciliation failed')).finally(()=>{starboardRun=null;});return starboardRun;};
+  const starboardReconnect=()=>{if(starboardActive)void recoverStarboard();};
+  features.push({key:'starboard',async start(){starboardActive=true;removeStarboardEvents=registerStarboardEvents(discord.client,starboard,accepts,logger);discord.client.on(Events.ClientReady,starboardReconnect);discord.client.on(Events.ShardResume,starboardReconnect);removeStarboardTimer=starboardScheduler.register('starboard-recovery',300000,recoverStarboard);await recoverStarboard();},async stop(){starboardActive=false;removeStarboardEvents();removeStarboardTimer();discord.client.off(Events.ClientReady,starboardReconnect);discord.client.off(Events.ShardResume,starboardReconnect);await starboardScheduler.stop();await starboardRun;}});
   const suggestions=createSuggestionService({db,clock,port:createSuggestionPort(discord.client,accepts),status:registry});registerSuggestionCommands(router,suggestions);
   const suggestionScheduler=createScheduler(logger);let suggestionActive=false,removeSuggestionRefresh=()=>{},removeSuggestionRecovery=()=>{};
   const recoverSuggestions=async()=>{const guilds=await db.query<{id:string}>('SELECT id FROM guilds WHERE active AND bot_present');for(const guild of guilds.rows)if(suggestionActive&&await accepts(guild.id))await suggestions.recover(guild.id);};
