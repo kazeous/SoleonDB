@@ -1,0 +1,19 @@
+name: eousbot-rebuild-tests
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: eousbot_test
+      POSTGRES_PASSWORD: local-disposable-test
+      POSTGRES_DB: eousbot_test
+    ports:
+      - '127.0.0.1::5432'
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U eousbot_test -d eousbot_test']
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+
