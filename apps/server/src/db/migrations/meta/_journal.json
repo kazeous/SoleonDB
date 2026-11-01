@@ -36,6 +36,20 @@
       "when": 1793523368949,
       "tag": "0004_rich_darkstar",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1793524342116,
+      "tag": "0005_heavy_the_watchers",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793524782064,
+      "tag": "0006_black_dark_beast",
+      "breakpoints": true
     }
   ]
 }

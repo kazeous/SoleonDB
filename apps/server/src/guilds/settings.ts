@@ -1,5 +1,5 @@
 import type {FeatureConfigMap,SettingsKey,Versioned} from '@eousbot/contracts';
-import {settingsSchemas,settingsDefaults,isSettingsKey} from '@eousbot/contracts';
+import {settingsSchemas,settingsDefaults,isSettingsKey,moderationConfigSchema} from '@eousbot/contracts';
 import type {AppDb,SqlSession} from '../db/client.js';
 import {withTransaction} from '../db/client.js';
 import {withConfigLock} from '../db/locks.js';
@@ -26,7 +26,7 @@ export function createSettingsService(db:AppDb,clock:Clock) {
       return withTransaction(db,tx=>withConfigLock(tx,guildId,async()=>{
         const current=await readAt(tx,guildId,key);
         if(current.revision!==expectedRevision) throw new AppError('conflict','Settings changed. Reload before saving.');
-        const logChannelId=key==='moderation' ? value.logChannelId : null;
+        const logChannelId=key==='moderation' ? moderationConfigSchema.parse(value).logChannelId : null;
         if(logChannelId) {
           const local=await tx.query('SELECT 1 FROM guild_channels WHERE guild_id=$1 AND id=$2 AND type=$3',[guildId,logChannelId,'text']);
           if(!local.rowCount) throw new AppError('validation','Choose a text channel in this server',{logChannelId:'Invalid channel'});

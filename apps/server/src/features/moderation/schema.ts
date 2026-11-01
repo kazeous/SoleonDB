@@ -1,10 +1,11 @@
+import type {AutoModSnapshot} from '@eousbot/contracts';
 import {pgTable,text,uuid,integer,bigint,jsonb,primaryKey,foreignKey,index,unique} from 'drizzle-orm/pg-core';
 import {guilds} from '../../guilds/schema.js';
 import type {IncidentIntent,CaseOutcome} from './incidents.js';
 export const moderationIncidents=pgTable('moderation_incidents',{
  guildId:text('guild_id').notNull().references(()=>guilds.id),id:uuid('id').notNull(),userId:text('user_id').notNull(),source:text('source').notNull(),
- intent:jsonb('intent').$type<IncidentIntent>().notNull(),state:text('state').notNull().default('pending'),workerId:text('worker_id'),dispatchToken:uuid('dispatch_token'),leaseUntil:bigint('lease_until',{mode:'number'}),createdAt:bigint('created_at',{mode:'number'}).notNull(),
-},t=>[primaryKey({columns:[t.guildId,t.id]}),unique('incident_global_identity').on(t.id),index('incident_queue').on(t.state,t.createdAt,t.id),index('incidents_member').on(t.guildId,t.userId,t.createdAt)]);
+ intent:jsonb('intent').$type<IncidentIntent>().notNull(),state:text('state').notNull().default('pending'),operationKey:text('operation_key'),workerId:text('worker_id'),dispatchToken:uuid('dispatch_token'),leaseUntil:bigint('lease_until',{mode:'number'}),createdAt:bigint('created_at',{mode:'number'}).notNull(),
+},t=>[primaryKey({columns:[t.guildId,t.id]}),unique('incident_global_identity').on(t.id),unique('incident_operation_identity').on(t.guildId,t.operationKey),index('incident_queue').on(t.state,t.createdAt,t.id),index('incidents_member').on(t.guildId,t.userId,t.createdAt)]);
 export const memberCooldowns=pgTable('member_cooldowns',{
  guildId:text('guild_id').notNull(),userId:text('user_id').notNull(),until:bigint('until',{mode:'number'}).notNull(),parentIncidentId:uuid('parent_incident_id').notNull(),
 },t=>[primaryKey({columns:[t.guildId,t.userId]}),foreignKey({columns:[t.guildId,t.parentIncidentId],foreignColumns:[moderationIncidents.guildId,moderationIncidents.id]})]);
@@ -13,7 +14,7 @@ export const guildCaseCounters=pgTable('guild_case_counters',{
 });
 export const moderationCases=pgTable('moderation_cases',{
  guildId:text('guild_id').notNull(),id:uuid('id').notNull(),number:integer('number').notNull(),targetId:text('target_id').notNull(),actorId:text('actor_id'),
- source:text('source').notNull(),action:text('action'),reason:text('reason').notNull(),ruleSnapshot:jsonb('rule_snapshot').notNull(),
+ source:text('source').notNull(),action:text('action'),durationSeconds:integer('duration_seconds'),policySnapshot:jsonb('policy_snapshot').$type<AutoModSnapshot>(),reason:text('reason').notNull(),ruleSnapshot:jsonb('rule_snapshot').notNull(),
  createdAt:bigint('created_at',{mode:'number'}).notNull(),outcome:jsonb('outcome').$type<CaseOutcome>(),
 },t=>[primaryKey({columns:[t.guildId,t.id]}),unique('case_guild_number').on(t.guildId,t.number),foreignKey({columns:[t.guildId,t.id],foreignColumns:[moderationIncidents.guildId,moderationIncidents.id]}),index('cases_cursor').on(t.guildId,t.createdAt,t.id),index('cases_member').on(t.guildId,t.targetId,t.createdAt)]);
 

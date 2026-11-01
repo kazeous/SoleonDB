@@ -1,6 +1,6 @@
 import type {Express,Request} from 'express';
 import {z} from 'zod';
-import {snowflakeSchema,isSettingsKey} from '@eousbot/contracts';
+import {snowflakeSchema,isSettingsKey,settingsReferences} from '@eousbot/contracts';
 import type {HttpDeps} from '../http/app.js';
 import {createGuildService} from './service.js';
 import {createSettingsService} from './settings.js';
@@ -33,7 +33,10 @@ export function registerGuildRoutes(app:Express,deps:HttpDeps):void {
     const body=z.strictObject({revision:z.number().int().min(0),value:z.unknown()}).parse(req.body);
     const value=await import('@eousbot/contracts').then(c=>c.settingsSchemas[key].parse(body.value));
     const channels=await guilds.syncChannels(id);
-    if(value.logChannelId&&!channels.some(c=>c.id===value.logChannelId&&c.type==='text')) throw new AppError('validation','Select a text channel in this server',{logChannelId:'Invalid channel'});
+    const references=settingsReferences(key,value);
+    if(references.channels.some(ref=>!channels.some(c=>c.guildId===id&&c.id===ref.id&&c.type===ref.type)))throw new AppError('validation','Select channels in this server');
+    if(references.roleIds.length){const roles=await deps.directory.roles(id);if(references.roleIds.some(roleId=>!roles.some(r=>r.guildId===id&&r.id===roleId)))throw new AppError('validation','Select roles in this server');}
+    for(const memberId of references.memberIds)if(!(await deps.directory.members(id,memberId,1)).some(m=>m.guildId===id&&m.id===memberId))throw new AppError('validation','Select members in this server');
     res.json(await settings.update(id,key,value,body.revision,sessionOwner(req)));
   });
 }

@@ -1,3 +1,4 @@
+import {automodConfigSchema} from '@eousbot/contracts';
 import {randomUUID} from 'node:crypto';
 import type {AppDb} from '../../db/client.js';
 import {withTransaction} from '../../db/client.js';
@@ -11,7 +12,7 @@ import type {ModerationPort,RelatedMessageStore,TargetEligibility} from './ports
 import {ModerationEffectError} from './ports.js';
 import {readEffects,completeEffect,finishIncident} from './effects.js';
 import type {EffectRow} from './effects.js';
-export interface EnforcementDeps {db:AppDb;clock:Clock;port:ModerationPort;related:RelatedMessageStore;canDispatch?:()=>boolean;log?:(intent:IncidentIntent,outcome:CaseOutcome)=>Promise<void>}
+export interface EnforcementDeps {db:AppDb;clock:Clock;port:ModerationPort;related:RelatedMessageStore;canDispatch?:()=>boolean;authorizeCommand?:(intent:IncidentIntent)=>Promise<void>;log?:(intent:IncidentIntent,outcome:CaseOutcome)=>Promise<void>}
 async function deadline<T>(run:()=>Promise<T>):Promise<T>{
  let timer:ReturnType<typeof setTimeout>|undefined;
  try{return await Promise.race([run(),new Promise<never>((_resolve,reject)=>{timer=setTimeout(()=>reject(new ModerationEffectError('unknown','Discord request outcome unknown')),15000);})]);}finally{if(timer)clearTimeout(timer);}
@@ -33,6 +34,11 @@ export function createEnforcementService(deps:EnforcementDeps) {
    if(!owned.rowCount)throw new AppError('conflict','Incident is owned by another dispatcher');
    let invalid=(await tx.query('SELECT 1 FROM guilds WHERE id=$1 AND active AND bot_present',[intent.guildId])).rowCount===0;
    for(const contributor of intent.contributors){const current=await rules.current(tx,intent.guildId,contributor.ruleId);if(!current||!current.enabled||current.revision!==contributor.revision||current.exemptUserIds.includes(intent.userId)||current.exemptRoleIds.some(id=>target.roleIds.includes(id)))invalid=true;}
+   if(intent.source==='general_automod'){
+    const stored=(await tx.query<{revision:number;value:unknown}>('SELECT revision,value FROM feature_settings WHERE guild_id=$1 AND feature=$2',[intent.guildId,'automod'])).rows[0];
+    const config=stored?automodConfigSchema.parse(stored.value):null;
+    if(!config?.enabled||stored?.revision!==intent.settingsRevision||config.exemptUserIds.includes(intent.userId)||config.exemptRoleIds.some(id=>target.roleIds.includes(id)))invalid=true;
+   }
    if(invalid){await tx.query("UPDATE incident_effects SET state='cancelled',reason=$3,completed_at=$4 WHERE guild_id=$1 AND incident_id=$2 AND state='pending'",[intent.guildId,intent.id,'Configuration changed or target became exempt before dispatch',clock.now()]);return [];}
    // This durable authorization point precedes dispatch with no intervening external await.
    await tx.query('UPDATE moderation_incidents SET lease_until=$3 WHERE guild_id=$1 AND id=$2',[intent.guildId,intent.id,clock.now()+60000]);
@@ -41,6 +47,7 @@ export function createEnforcementService(deps:EnforcementDeps) {
  }
  async function punish(intent:IncidentIntent,token:string){
   const effect=(await readEffects(db,intent)).find(r=>r.effect_key==='punishment');if(!intent.action||effect?.state!=='pending')return;
+  if(intent.source==='command'&&deps.authorizeCommand){try{await deps.authorizeCommand(intent);}catch{await completeEffect(db,intent,'punishment','blocked',clock.now(),'Actor permission or hierarchy no longer allows this action');return;}}
   let target:TargetEligibility;
   try{target=await deadline(()=>port.inspect(intent.guildId,intent.userId));}catch {await completeEffect(db,intent,'punishment','failed',clock.now(),'Target permissions unavailable; no action sent');return;}
   let blockedReason:string|undefined;
@@ -67,6 +74,7 @@ export function createEnforcementService(deps:EnforcementDeps) {
  async function cleanup(intent:IncidentIntent,token:string){
   while(true){
    const pending=(await readEffects(db,intent)).filter(r=>r.kind==='cleanup'&&r.state==='pending').slice(0,5);if(!pending.length)return;
+   if(intent.source==='command'&&deps.authorizeCommand){try{await deps.authorizeCommand(intent);}catch{for(const effect of (await readEffects(db,intent)).filter(row=>row.kind==='cleanup'&&row.state==='pending'))await completeEffect(db,intent,effect.effect_key,'failed',clock.now(),'Actor no longer has cleanup permission');return;}}
    let target:TargetEligibility;
    try{target=await deadline(()=>port.inspect(intent.guildId,intent.userId));}catch {for(const effect of (await readEffects(db,intent)).filter(row=>row.kind==='cleanup'&&row.state==='pending'))await completeEffect(db,intent,effect.effect_key,'failed',clock.now(),'Target state unavailable; no deletion sent');return;}
    const authorized=await authorize(intent,token,pending.map(e=>e.effect_key),target);if(!authorized.length)return;

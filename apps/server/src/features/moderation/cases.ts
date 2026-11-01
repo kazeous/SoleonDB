@@ -2,11 +2,10 @@ import {z} from 'zod';
 import type {AppDb} from '../../db/client.js';
 import type {CaseOutcome,IncidentIntent} from './incidents.js';
 import type {ChannelRule} from '@eousbot/contracts';
-export interface CaseFilter {memberId?:string;action?:string;source?:string;outcome?:string;from?:number;to?:number}
-export interface ModerationCase {id:string;guildId:string;number:number;targetId:string;actorId:string|null;source:IncidentIntent['source'];action:string|null;reason:string;ruleSnapshot:ChannelRule[];createdAt:number;outcome:CaseOutcome|null}
-export interface CasePage {items:ModerationCase[];nextCursor:string|null}
-interface CaseRow {id:string;guild_id:string;number:number;target_id:string;actor_id:string|null;source:IncidentIntent['source'];action:string|null;reason:string;rule_snapshot:ChannelRule[];created_at:string;outcome:CaseOutcome|null}
-function decode(row:CaseRow):ModerationCase {return {id:row.id,guildId:row.guild_id,number:row.number,targetId:row.target_id,actorId:row.actor_id,source:row.source,action:row.action,reason:row.reason,ruleSnapshot:row.rule_snapshot,createdAt:Number(row.created_at),outcome:row.outcome};}
+import type {CaseFilter,ModerationCase,CasePage} from '@eousbot/contracts';
+export type {CaseFilter,ModerationCase,CasePage} from '@eousbot/contracts';
+interface CaseRow {id:string;guild_id:string;number:number;target_id:string;actor_id:string|null;source:IncidentIntent['source'];action:ModerationCase['action'];duration_seconds:number|null;policy_snapshot:ModerationCase['policySnapshot'];reason:string;rule_snapshot:ChannelRule[];created_at:string;outcome:CaseOutcome|null}
+function decode(row:CaseRow):ModerationCase {return {id:row.id,guildId:row.guild_id,number:row.number,targetId:row.target_id,actorId:row.actor_id,source:row.source,action:row.action,reason:row.reason,ruleSnapshot:row.rule_snapshot,createdAt:Number(row.created_at),durationSeconds:row.duration_seconds,policySnapshot:row.policy_snapshot,outcome:row.outcome};}
 export function createCaseRepository(db:AppDb) {
  return {
   async list(guildId:string,filter:CaseFilter={},cursor:string|null=null,limit=25):Promise<CasePage>{
