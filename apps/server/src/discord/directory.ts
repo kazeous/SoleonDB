@@ -37,7 +37,7 @@ export function createGuildDirectory(client:Client):GuildDirectory {
       }catch {throw unavailable('Channel data unavailable');}
     },
     async roles(guildId){try {const roles=await(await guild(guildId)).roles.fetch();return [...roles.values()].map(role=>({id:role.id,guildId,name:role.name,position:role.position,managed:role.managed,permissions:role.permissions.bitfield.toString()}));}catch {throw unavailable('Role data unavailable');}},
-    async members(guildId,query,limit){try {const members=await(await guild(guildId)).members.search({query,limit:Math.min(25,Math.max(1,limit))});return [...members.values()].map(member=>({id:member.id,guildId,displayName:member.displayName,roleIds:[...member.roles.cache.keys()],permissions:member.permissions.bitfield.toString()}));}catch {throw unavailable('Member search unavailable');}},
+    async members(guildId,query,limit){try {const current=await guild(guildId);const members=/^[1-9][0-9]{0,19}$/.test(query)?[await current.members.fetch({user:query,force:true})]:[...(await current.members.search({query,limit:Math.min(25,Math.max(1,limit))})).values()];return members.map(member=>({id:member.id,guildId,displayName:member.displayName,roleIds:[...member.roles.cache.keys()],permissions:member.permissions.bitfield.toString()}));}catch(error) {if(error&&typeof error==='object'&&'code' in error&&error.code===10007)return [];throw unavailable('Member search unavailable');}},
   };
 }
 

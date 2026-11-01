@@ -13,6 +13,6 @@ export class FakeDirectory implements GuildDirectory {
   async access(_owner:string,guild:string){this.check();return this.guilds.some(g=>g.id===guild)?this.accessMode:'none';}
   async channels(guild:string){this.check();return this.channelData.filter(c=>c.guildId===guild);}
   async roles(guild:string){this.check();return this.roleData.filter(c=>c.guildId===guild);}
-  async members(guild:string,query:string,limit:number){this.check();return this.memberData.filter(c=>c.guildId===guild&&c.displayName.includes(query)).slice(0,limit);}
+  async members(guild:string,query:string,limit:number){this.check();return this.memberData.filter(c=>c.guildId===guild&&(c.id===query||c.displayName.includes(query))).slice(0,limit);}
 }
 

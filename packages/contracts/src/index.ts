@@ -4,3 +4,4 @@ export * from './guilds.js';
 export * from './features.js';
 
 export * from './settings.js';
+export * from './channel-rules.js';

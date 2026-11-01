@@ -15,6 +15,13 @@
       "when": 1793521596098,
       "tag": "0001_curly_songbird",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793522532015,
+      "tag": "0002_yummy_orphan",
+      "breakpoints": true
     }
   ]
 }

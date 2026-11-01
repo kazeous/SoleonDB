@@ -1,4 +1,5 @@
 import express from 'express';
+import {registerProtectionRoutes} from '../features/protection/routes.js';
 import {registerHealthRoutes} from './health.js';
 import type {Express} from 'express';
 import session from 'express-session';
@@ -29,6 +30,7 @@ export function createHttpApp(deps:HttpDeps):Express {
   registerAuthRoutes(app,deps);
   app.use('/api',requireOwner(deps),requireCsrf(deps.env));
   registerGuildRoutes(app,deps);
+  registerProtectionRoutes(app,deps);
   app.use('/api',()=>{throw new AppError('not_found','API route not found');});
   app.use(errorHandler(deps.logger));
   return app;
