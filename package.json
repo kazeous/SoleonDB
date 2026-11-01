@@ -14,19 +14,18 @@
     "build": "npm run build --workspaces --if-present",
     "test:integration": "vitest run --project integration",
     "db:generate": "node scripts/generate-migrations.mjs",
-    "db:migrate": "node apps/server/dist/db/migrate.js"
+    "db:migrate": "node apps/server/dist/db/migrate.js",
+    "dev:server": "npm run build -w @eousbot/server && node --env-file-if-exists=.env apps/server/dist/main.js",
+    "commands:deploy": "node --env-file-if-exists=.env apps/server/dist/discord/deploy-commands.js"
   },
   "engines": {
     "node": ">=24 <25"
   },
   "dependencies": {
     "cookie-parser": "^1.4.7",
-    "discord.js": "14.26.4",
+    "discord.js": "14.28.0",
     "dotenv": "16.4.5",
-    "express": "^5.2.1"
-  },
-  "overrides": {
-    "undici": "6.27.0"
+    "express": "5.3.0"
   },
   "workspaces": [
     "packages/*",

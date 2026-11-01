@@ -1,4 +1,5 @@
 import express from 'express';
+import {registerHealthRoutes} from './health.js';
 import type {Express} from 'express';
 import session from 'express-session';
 import type {RuntimeEnv} from '../core/env.js';
@@ -21,8 +22,7 @@ export function createHttpApp(deps:HttpDeps):Express {
     res.set({'X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'same-origin','Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; font-src 'self'; frame-ancestors 'none'; base-uri 'self'"});next();
   });
   // Probes must remain independent of session/DB middleware.
-  app.get('/health',(_req,res)=>{const value=deps.status.health();res.status(value.status).json(value.body);});
-  app.get('/ready',(_req,res)=>{const value=deps.status.ready();res.status(value.status).json(value.body);});
+  registerHealthRoutes(app,deps.status);
   app.use('/api',express.json({limit:'64kb'}));
   app.use('/api',session({name:'eousbot.sid',secret:deps.env.sessionSecret,store:new PostgresSessionStore(deps.db,deps.clock),resave:false,saveUninitialized:false,rolling:false,cookie:{httpOnly:true,sameSite:'lax',secure:deps.env.nodeEnv==='production',path:'/'}}));
   app.use('/api',(_req,res,next)=>{res.set('Cache-Control','no-store');next();});

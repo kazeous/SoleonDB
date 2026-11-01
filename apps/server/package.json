@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@eousbot/contracts": "0.1.0",
+    "discord.js": "14.28.0",
     "drizzle-orm": "0.45.4",
     "express": "5.3.0",
     "express-session": "1.19.0",
