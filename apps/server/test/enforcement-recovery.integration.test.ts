@@ -27,7 +27,7 @@ it('a changed Ban contributor cancels all combined work even when Timeout remain
 it('config changes after dispatched cleanup preserve completed counts and cancel pending punishment',()=>withTestDb(async db=>{
  const clock=fakeClock(1000),{intent,rule}=await incident(db,clock,{kind:'ban'},6),port=new FakeModerationPort(db);let inspectCount=0;let resume=()=>{};
  port.onInspect=async()=>{inspectCount++;if(inspectCount===1)await new Promise<void>(r=>{resume=r;});};
- let changed=false;port.onDelete=async()=>{if(!changed){changed=true;await db.query('UPDATE channel_rules SET revision=revision+1 WHERE id=$1',[rule.id]);resume();}};
+ let changed=false;port.onDeleted=async()=>{if(!changed){changed=true;await db.query('UPDATE channel_rules SET revision=revision+1 WHERE id=$1',[rule.id]);resume();}};
  const result=await createEnforcementService({db,clock,port,related}).dispatch(intent.id);expect(result.cleanup.deleted).toBeGreaterThan(0);expect(result.cleanup.deleted).toBeLessThanOrEqual(5);expect(result.punishment.state).toBe('cancelled');expect(port.calls.filter(c=>c.kind==='ban')).toEqual([]);expect(result.state).toBe('cancelled');
 }));
 
