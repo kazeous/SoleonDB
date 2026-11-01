@@ -1,3 +1,8 @@
+import {createFeedProviders} from './features/feeds/providers/index.js';
+import {createFeedDelivery} from './features/feeds/delivery.js';
+import {createFeedPort} from './features/feeds/discord.js';
+import {createFeedScheduler} from './features/feeds/scheduler.js';
+import {fetchPublicText} from './http-client/public-fetch.js';
 import {createSocialService} from './features/social/service.js';
 import {createSocialRepository} from './features/social/repository.js';
 import {createSocialPort} from './features/social/discord.js';
@@ -103,6 +108,7 @@ export function bootstrap(env:RuntimeEnv) {
   discord.client.on(Events.MessageCreate,message=>{void messageHandler(message).catch(()=>{if(message.guildId)registry.set(message.guildId,'moderation','degraded','Message data or processing unavailable');logger.error({guildId:message.guildId},'Message handler failed');});});
   discord.client.on(Events.MessageUpdate,(_old,message)=>{void messageHandler(message).catch(()=>logger.error({guildId:message.guildId},'Message edit handler failed'));});
   discord.client.on(Events.GuildDelete,guild=>{void db.query('UPDATE guilds SET active=false,bot_present=false WHERE id=$1',[guild.id]).catch(()=>logger.error({guildId:guild.id},'Guild removal persistence failed'));});
+  const feeds=createFeedDelivery({db,clock,providers:createFeedProviders({fetchPublicText,clock,credentials:env.feedCredentials}),port:createFeedPort(discord.client,accepts),status:registry,canDispatch});features.push(createFeedScheduler({db,clock,logger,delivery:feeds,canRun:canDispatch}));
   const social=createSocialService({db,clock,port:createSocialPort(discord.client,accepts),status:registry,canDispatch});
   const socialStage:MessageStage=async(message,disposition)=>{const current=disposition??{kind:'allow'};await social.process(message,current);return current;};
   const socialScheduler=createScheduler(logger);let socialActive=false,removeSocialTimer=()=>{};

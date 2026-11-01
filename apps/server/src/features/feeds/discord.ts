@@ -8,7 +8,7 @@ import {FeedSendCancelled} from './types.js';
 import type {FeedPort} from './types.js';
 import {FeedSendError} from './delivery.js';
 function missing(error:unknown){return error&&typeof error==='object'&&'code'in error&&(error.code===10003||error.code===10008);}
-export function buildFeedPayload(raw:FeedItem){const item=feedItemSchema.parse(raw);return {embeds:[{title:item.title,url:item.url,...(item.description?{description:item.description}:{}),...(item.imageUrl?{image:{url:item.imageUrl}}:{}),timestamp:new Date(item.publishedAt).toISOString(),footer:{text:'Feed update'}}],allowedMentions:{parse:[] as never[]}};}
+export function buildFeedPayload(raw:FeedItem){const item=feedItemSchema.parse(raw);return {embeds:[{title:item.title,url:item.url,...(item.description?{description:item.description}:{}),...(item.imageUrl?{image:{url:item.imageUrl}}:{}),...(item.publishedAt>0?{timestamp:new Date(item.publishedAt).toISOString()}:{}),footer:{text:'Feed update'}}],allowedMentions:{parse:[] as never[]}};}
 export function createFeedPort(client:Client,canOperate:(guildId:string)=>Promise<boolean>):FeedPort{
  async function guard(guildId:string){assertOutsideTransaction();if(!client.isReady()||!await canOperate(guildId))throw new AppError('unavailable','Feed worker is not active');const guild=client.guilds.cache.get(guildId);if(!guild)throw new AppError('unavailable','Server unavailable');return guild;}
  async function destination(guildId:string,channelId:string){const guild=await guard(guildId),value=await guild.channels.fetch(channelId);if(!value||value.guildId!==guildId||value.type!==ChannelType.GuildText&&value.type!==ChannelType.GuildAnnouncement)throw new AppError('not_found','Feed destination is missing');return value;}
