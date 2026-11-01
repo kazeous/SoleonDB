@@ -9,6 +9,30 @@ The replacement uses one non-root application image and a separate PostgreSQL 17
 3. Supply optional provider credentials/models through deployment environment. Those values do not enable a guild feature or opt any channel into external AI processing. Select currently supported models explicitly; no obsolete default model is assumed.
 4. Back up PostgreSQL and verify the archive. Inspect migrations for compatibility with the currently deployed image. No down migration runs automatically.
 
+## Replacing the legacy Coolify environment
+
+The old bot's Discord variables alone cannot start the replacement. `ADMIN_DISCORD_IDS` is not used for dashboard ownership; configure one `OWNER_DISCORD_ID`. The replacement requires a PostgreSQL resource and fresh configuration rather than the old JSON data mount.
+
+In the application's **Environment Variables**, configure all seven values below with Runtime set to **Available in the container**. Set Build time to **Not available during build**; none of these values is needed to build the image. Use Normal view when preserving existing locked secrets. See [Coolify environment variables](https://coolify.io/docs/applications/configuration/environment-variables).
+
+| Variable | Required runtime value |
+| --- | --- |
+| `DISCORD_TOKEN` | The bot token from the designated Discord application. |
+| `DISCORD_CLIENT_ID` | That application's ID. |
+| `DISCORD_CLIENT_SECRET` | That application's OAuth client secret. |
+| `OWNER_DISCORD_ID` | The one human owner's Discord user ID, not an application/server ID or comma-separated list. |
+| `DATABASE_URL` | The dedicated PostgreSQL 17 resource's private internal connection URL, accessible from the application network. |
+| `DASHBOARD_REDIRECT_URI` | `https://YOUR_HOST/api/auth/discord/callback`, registered exactly in the Discord application's OAuth redirects. Production requires HTTPS. |
+| `SESSION_SECRET` | A securely generated secret with at least 32 characters, retained across restarts. |
+
+Keep `NODE_ENV=production`, `PORT=3000` and Coolify's exposed port at `3000`. Set `TRUSTED_PROXY_CIDRS` to the actual Coolify proxy network for HTTPS session handling. Save the variables, perform the explicit migration below, then start the replacement only after the legacy worker is stopped. Runtime changes need the container environment recreated; image rebuilds are needed only for source/build changes.
+
+### Startup exits before health becomes available
+
+`Application initialization failed: missing or invalid runtime configuration: ...` lists field names only. Correct those runtime fields; logs deliberately omit their values. The older generic `Application initialization failed; check required configuration.` message means the original build hid the specific reason. Verify every field in the table, including the production HTTPS callback requirement.
+
+An image build completing does not establish application startup. A configuration exit happens before HTTP listens, so `/health` cannot pass. The Dockerfile health command uses Node's built-in `fetch` and does not require curl or wget. Keep the health check enabled and correct the startup configuration. PostgreSQL must then be reachable and migrated for `/ready` to pass; a disconnected or standby worker truthfully remains unready.
+
 ## Stop, migrate, start
 
 1. Stop the old worker and confirm it is stopped before allowing the new worker to connect. Never run the original and replacement with the same token at once. Do not rely only on a rolling deployment's overlapping replicas.

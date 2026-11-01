@@ -27,6 +27,14 @@ export interface RuntimeEnv {
   databaseUrl:string; redirectUri:string; sessionSecret:string; port:number;
   nodeEnv:'development'|'production'|'test'; trustedProxyCidrs:string[]; enablePresences:boolean; enableMessageContent:boolean;
 }
+export function formatStartupFailure(error:unknown):string {
+  // Only schema-owned field names may leave the process. Error messages,
+  // field details and unknown keys can contain credentials or URLs.
+  const fields=error instanceof AppError&&error.code==='validation'
+    ?schema.keyof().options.filter(field=>Object.hasOwn(error.fields??{},field)):[];
+  if(fields.length)return 'Application initialization failed: missing or invalid runtime configuration: '+fields.join(', ')+'. Check the runtime environment variables.\n';
+  return 'Application initialization failed; check runtime configuration and startup dependencies.\n';
+}
 export function parseRuntimeEnv(input:Record<string,string|undefined>):RuntimeEnv {
   const result=schema.safeParse(input);
   if(!result.success) {
@@ -36,7 +44,7 @@ export function parseRuntimeEnv(input:Record<string,string|undefined>):RuntimeEn
   }
   const value=result.data;
   if(value.NODE_ENV==='production' && new URL(value.DASHBOARD_REDIRECT_URI).protocol!=='https:') {
-    throw new AppError('validation','Production OAuth redirect requires HTTPS');
+    throw new AppError('validation','Production OAuth redirect requires HTTPS',{DASHBOARD_REDIRECT_URI:'HTTPS is required in production'});
   }
   return {summaryProviderConfig:{openaiApiKey:value.OPENAI_API_KEY,openaiModel:value.OPENAI_SUMMARY_MODEL,geminiApiKey:value.GEMINI_API_KEY,geminiModel:value.GEMINI_SUMMARY_MODEL},feedCredentials:{twitchClientId:value.TWITCH_CLIENT_ID,twitchClientSecret:value.TWITCH_CLIENT_SECRET,redditClientId:value.REDDIT_CLIENT_ID,redditClientSecret:value.REDDIT_CLIENT_SECRET,redditUserAgent:value.REDDIT_USER_AGENT},discordToken:value.DISCORD_TOKEN,clientId:value.DISCORD_CLIENT_ID,clientSecret:value.DISCORD_CLIENT_SECRET,ownerId:value.OWNER_DISCORD_ID,databaseUrl:value.DATABASE_URL,redirectUri:value.DASHBOARD_REDIRECT_URI,sessionSecret:value.SESSION_SECRET,port:value.PORT,nodeEnv:value.NODE_ENV,trustedProxyCidrs:value.TRUSTED_PROXY_CIDRS,enablePresences:value.DISCORD_ENABLE_PRESENCES,enableMessageContent:value.DISCORD_ENABLE_MESSAGE_CONTENT};
 }
