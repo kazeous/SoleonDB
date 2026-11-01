@@ -16,7 +16,8 @@
     "db:generate": "node scripts/generate-migrations.mjs",
     "db:migrate": "node apps/server/dist/db/migrate.js",
     "dev:server": "npm run build -w @eousbot/server && node --env-file-if-exists=.env apps/server/dist/main.js",
-    "commands:deploy": "node --env-file-if-exists=.env apps/server/dist/discord/deploy-commands.js"
+    "commands:deploy": "node --env-file-if-exists=.env apps/server/dist/discord/deploy-commands.js",
+    "test:e2e": "e2e run"
   },
   "engines": {
     "node": ">=24 <25"
@@ -32,13 +33,17 @@
     "apps/*"
   ],
   "devDependencies": {
+    "@e2e-dev/web": "0.15.4",
     "@types/express": "5.0.6",
     "@types/express-session": "1.19.0",
     "@types/node": "24.19.2",
     "@types/pg": "8.23.1",
     "@types/supertest": "7.2.1",
     "drizzle-kit": "0.31.11",
+    "e2e": "0.22.0",
+    "playwright-core": "1.64.1",
     "supertest": "7.3.1",
+    "tsx": "4.23.15",
     "typescript": "7.0.2",
     "vitest": "5.0.5"
   }
