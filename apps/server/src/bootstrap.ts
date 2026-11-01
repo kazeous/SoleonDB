@@ -1,3 +1,6 @@
+import {createSuggestionService} from './features/suggestions/service.js';
+import {createSuggestionPort} from './features/suggestions/discord.js';
+import {registerSuggestionCommands} from './features/suggestions/commands.js';
 import {createVoiceRepository} from './features/voice/repository.js';
 import {createVoiceHubService} from './features/voice/hubs.js';
 import {createVoiceRecovery} from './features/voice/recovery.js';
@@ -93,6 +96,10 @@ export function bootstrap(env:RuntimeEnv) {
   discord.client.on(Events.MessageCreate,message=>{void messageHandler(message).catch(()=>{if(message.guildId)registry.set(message.guildId,'moderation','degraded','Message data or processing unavailable');logger.error({guildId:message.guildId},'Message handler failed');});});
   discord.client.on(Events.MessageUpdate,(_old,message)=>{void messageHandler(message).catch(()=>logger.error({guildId:message.guildId},'Message edit handler failed'));});
   discord.client.on(Events.GuildDelete,guild=>{void db.query('UPDATE guilds SET active=false,bot_present=false WHERE id=$1',[guild.id]).catch(()=>logger.error({guildId:guild.id},'Guild removal persistence failed'));});
+  const suggestions=createSuggestionService({db,clock,port:createSuggestionPort(discord.client,accepts),status:registry});registerSuggestionCommands(router,suggestions);
+  const suggestionScheduler=createScheduler(logger);let suggestionActive=false,removeSuggestionRefresh=()=>{},removeSuggestionRecovery=()=>{};
+  const recoverSuggestions=async()=>{const guilds=await db.query<{id:string}>('SELECT id FROM guilds WHERE active AND bot_present');for(const guild of guilds.rows)if(suggestionActive&&await accepts(guild.id))await suggestions.recover(guild.id);};
+  features.push({key:'suggestions',async start(){suggestionActive=true;removeSuggestionRefresh=suggestionScheduler.register('suggestion-card-refresh',2000,async()=>{const guilds=await db.query<{id:string}>('SELECT id FROM guilds WHERE active AND bot_present');for(const guild of guilds.rows)if(suggestionActive&&await accepts(guild.id))await suggestions.flush(guild.id);});removeSuggestionRecovery=suggestionScheduler.register('suggestion-delivery-recovery',300000,recoverSuggestions);await recoverSuggestions();},async stop(){suggestionActive=false;removeSuggestionRefresh();removeSuggestionRecovery();await suggestionScheduler.stop();}});
   const voiceRepository=createVoiceRepository(db,clock),voicePort=createVoicePort(discord.client,accepts),voiceHubs=createVoiceHubService({settings:createSettingsService(db,clock),repository:voiceRepository,port:voicePort,status:registry}),voiceRecovery=createVoiceRecovery({repository:voiceRepository,port:voicePort,status:registry}),voiceControls=createVoiceControlService({repository:voiceRepository,port:voicePort,status:registry});
   registerVoiceControls(router,voiceControls,voiceRepository,voicePort);
   const voiceScheduler=createScheduler(logger);let voiceActive=false,removeVoiceEvents=()=>{},removeVoiceTimer=()=>{};let voiceRun:Promise<void>|null=null;

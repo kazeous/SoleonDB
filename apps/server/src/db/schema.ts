@@ -7,3 +7,4 @@ export * from '../features/verification/schema.js';
 export * from '../features/roles/schema.js';
 export * from '../features/greetings/schema.js';
 export * from '../features/voice/schema.js';
+export * from '../features/suggestions/schema.js';

@@ -12,3 +12,4 @@ export * from './verification.js';
 export * from './roles.js';
 export * from './greetings.js';
 export * from './voice.js';
+export * from './suggestions.js';

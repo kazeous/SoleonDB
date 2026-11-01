@@ -1,0 +1,9 @@
+import {snowflakeSchema,suggestionInputSchema,suggestionStatusSchema} from '@eousbot/contracts';
+import type {CommandRouter} from '../../discord/interactions.js';
+import type {SuggestionService} from './service.js';
+import {AppError} from '../../core/errors.js';
+export function registerSuggestionCommands(router:CommandRouter,service:SuggestionService):void{
+ router.register({kind:'command',name:'suggest',handler:async context=>{const input=suggestionInputSchema.parse({title:context.options.title,description:context.options.description}),posted=await service.submit(context.guildId!,context.userId!,input,context.id);await context.edit('Suggestion posted: https://discord.com/channels/'+context.guildId+'/'+(posted.channelId??context.channelId)+'/'+posted.messageId+'. '+(posted.threadCreated?'Discussion thread created.':posted.threadRequested===false?'Discussion threads are disabled.':'The discussion thread could not be confirmed; the suggestion was saved.'));}});
+ router.register({kind:'command',name:'suggestion',handler:async context=>{const messageId=snowflakeSchema.parse(context.options.message_id),status=suggestionStatusSchema.parse(context.options.status),reason=typeof context.options.reason==='string'?context.options.reason:'';await service.setStatus(context.guildId!,messageId,context.userId!,status,reason,context.id);await context.edit('Suggestion status saved. Its card refresh is queued.');}});
+ router.register({kind:'component',name:'suggestions',handler:async context=>{const parts=context.name.split(':');if(parts.length!==2||!['up','down'].includes(parts[1]??'')||!context.messageId)throw new AppError('validation','Invalid suggestion vote');const result=await service.vote(context.guildId!,context.messageId,context.userId!,parts[1] as 'up'|'down',context.id);await context.edit('Vote saved. '+result.up+' up, '+result.down+' down.');}});
+}
