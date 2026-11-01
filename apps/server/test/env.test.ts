@@ -7,3 +7,5 @@ it('redacts credential values in validation errors',()=>{try{parseRuntimeEnv({..
 it.each(['oops','0','65536','3.5',''])('rejects invalid port %s',PORT=>expect(()=>parseRuntimeEnv({...valid,PORT})).toThrow());
 it('validates configuration without making connections',()=>{const env=parseRuntimeEnv(valid);expect(env.ownerId).toBe(valid.OWNER_DISCORD_ID);expect(env.port).toBe(3000);});
 it('redacts structured logger credentials',()=>{let output='';const logger=createLogger({write(chunk:string){output+=chunk;}});logger.info({token:'hidden-token',databaseUrl:'hidden-db',headers:{authorization:'hidden-auth'},guildId:'123'},'operation');expect(output).not.toMatch(/hidden-/);expect(output).toContain('123');});
+
+it('invalid URLs produce standardized errors without retaining the secret input',()=>{try{parseRuntimeEnv({...valid,DATABASE_URL:'invalid-sensitive-url'});expect.fail('must reject');}catch(error){expect(error).toMatchObject({code:'validation'});expect(JSON.stringify(error)).not.toContain('invalid-sensitive-url');}});

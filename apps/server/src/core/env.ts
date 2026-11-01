@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import {isIP} from 'node:net';
 import { snowflakeSchema } from '@eousbot/contracts';
 import { AppError } from './errors.js';
 const schema=z.object({
@@ -6,16 +7,17 @@ const schema=z.object({
   DISCORD_CLIENT_ID:snowflakeSchema,
   DISCORD_CLIENT_SECRET:z.string().min(1),
   OWNER_DISCORD_ID:snowflakeSchema,
-  DATABASE_URL:z.url().refine(value=>['postgres:','postgresql:'].includes(new URL(value).protocol)),
-  DASHBOARD_REDIRECT_URI:z.url().refine(value=>['http:','https:'].includes(new URL(value).protocol)),
+  DATABASE_URL:z.url().refine(value=>value.startsWith('postgres://') || value.startsWith('postgresql://')),
+  DASHBOARD_REDIRECT_URI:z.url().refine(value=>value.startsWith('http://') || value.startsWith('https://')),
   SESSION_SECRET:z.string().min(32),
   PORT:z.string().regex(/^[0-9]+$/).transform(Number).pipe(z.number().int().min(1).max(65535)).default(3000),
+  TRUSTED_PROXY_CIDRS:z.string().default('loopback').transform(value=>value.split(',').map(v=>v.trim()).filter(Boolean)).refine(values=>values.length<=32&&values.every(value=>{if(value==='loopback')return true;const [address,prefix]=value.split('/');const family=isIP(address??'');return family!==0&&(prefix===undefined||(/^[0-9]+$/.test(prefix)&&Number(prefix)<=(family===4?32:128)));})),
   NODE_ENV:z.enum(['development','production','test']).default('development'),
 });
 export interface RuntimeEnv {
   discordToken:string; clientId:string; clientSecret:string; ownerId:string;
   databaseUrl:string; redirectUri:string; sessionSecret:string; port:number;
-  nodeEnv:'development'|'production'|'test';
+  nodeEnv:'development'|'production'|'test'; trustedProxyCidrs:string[];
 }
 export function parseRuntimeEnv(input:Record<string,string|undefined>):RuntimeEnv {
   const result=schema.safeParse(input);
@@ -28,6 +30,6 @@ export function parseRuntimeEnv(input:Record<string,string|undefined>):RuntimeEn
   if(value.NODE_ENV==='production' && new URL(value.DASHBOARD_REDIRECT_URI).protocol!=='https:') {
     throw new AppError('validation','Production OAuth redirect requires HTTPS');
   }
-  return {discordToken:value.DISCORD_TOKEN,clientId:value.DISCORD_CLIENT_ID,clientSecret:value.DISCORD_CLIENT_SECRET,ownerId:value.OWNER_DISCORD_ID,databaseUrl:value.DATABASE_URL,redirectUri:value.DASHBOARD_REDIRECT_URI,sessionSecret:value.SESSION_SECRET,port:value.PORT,nodeEnv:value.NODE_ENV};
+  return {discordToken:value.DISCORD_TOKEN,clientId:value.DISCORD_CLIENT_ID,clientSecret:value.DISCORD_CLIENT_SECRET,ownerId:value.OWNER_DISCORD_ID,databaseUrl:value.DATABASE_URL,redirectUri:value.DASHBOARD_REDIRECT_URI,sessionSecret:value.SESSION_SECRET,port:value.PORT,nodeEnv:value.NODE_ENV,trustedProxyCidrs:value.TRUSTED_PROXY_CIDRS};
 }
 

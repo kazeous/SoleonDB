@@ -8,6 +8,13 @@
       "when": 1793521295860,
       "tag": "0000_brave_victor_mancha",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1793521596098,
+      "tag": "0001_curly_songbird",
+      "breakpoints": true
     }
   ]
 }
