@@ -11,7 +11,8 @@ export interface VoicePort{
  move(guildId:string,userId:string,channelId:string):Promise<void>;
  getRoom(guildId:string,channelId:string):Promise<VoiceRoom|null>;
  deleteRoom(guildId:string,channelId:string):Promise<boolean>;
- panelExists?(guildId:string,channelId:string,messageId:string):Promise<boolean>;
+ panelExists(guildId:string,channelId:string,messageId:string):Promise<boolean>;
+ findPanel(guildId:string,channelId:string,operationId:string):Promise<string|null>;
  postOrEditPanel(guildId:string,channelId:string,ownerId:string,messageId:string|null,operationId:string):Promise<string>;
  setProperties(guildId:string,channelId:string,properties:VoiceProperties):Promise<void>;
  setOverwrites(guildId:string,channelId:string,ownerId:string,action:VoiceOverwrite):Promise<void>;

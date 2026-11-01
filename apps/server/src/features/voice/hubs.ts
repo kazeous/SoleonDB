@@ -2,7 +2,21 @@ import type {VoiceConfig,Versioned} from '@eousbot/contracts';
 import type {FeatureStatusRegistry} from '../../core/status.js';
 import type {VoicePort} from './ports.js';
 import type {VoiceRepository,VoiceRecord} from './repository.js';
-export async function repairVoicePanel(repository:VoiceRepository,port:VoicePort,room:VoiceRecord):Promise<void>{if(!room.channelId)return;if(room.panelId&&(!port.panelExists||await port.panelExists(room.guildId,room.channelId,room.panelId)))return;const panelId=await port.postOrEditPanel(room.guildId,room.channelId,room.ownerId,room.panelId,room.id);await repository.update(room.guildId,room.id,{panelId});}
+export async function repairVoicePanel(repository:VoiceRepository,port:VoicePort,room:VoiceRecord):Promise<void>{
+ if(!room.channelId)return;
+ if(room.panelId&&await port.panelExists(room.guildId,room.channelId,room.panelId))return;
+ // Reserve a new identity only for an initial panel or a confirmed deleted panel.
+ // A bounded negative lookup cannot prove that a previous send was rejected.
+ if(room.panelState==='sending'||room.panelState==='unknown'){
+  const panelId=room.panelOperationId?await port.findPanel(room.guildId,room.channelId,room.panelOperationId):null;
+  if(panelId&&room.panelOperationId){await repository.update(room.guildId,room.id,{panelId,panelState:'sent',expectedPanelOperationId:room.panelOperationId});return;}
+  await repository.update(room.guildId,room.id,{panelState:'unknown'});throw new Error('Voice panel delivery remains unconfirmed; no duplicate was sent');
+ }
+ const delivery=await repository.beginPanel(room.guildId,room.id,room.panelId);
+ if(!delivery?.panelOperationId)throw new Error('Voice panel reservation changed');
+ try{const panelId=await port.postOrEditPanel(room.guildId,room.channelId,room.ownerId,null,delivery.panelOperationId);await repository.update(room.guildId,room.id,{panelId,panelState:'sent',expectedPanelOperationId:delivery.panelOperationId});}
+ catch(error){await repository.update(room.guildId,room.id,{panelState:'unknown',expectedPanelOperationId:delivery.panelOperationId});throw error;}
+}
 export function createVoiceHubService(deps:{settings:{read(guildId:string,key:'voice'):Promise<Versioned<VoiceConfig>>};repository:VoiceRepository;port:VoicePort;status:FeatureStatusRegistry}){
  const queues=new Map<string,Promise<void>>();
  async function changed(event:{guildId:string;userId:string;oldChannelId:string|null;newChannelId:string|null}){

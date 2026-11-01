@@ -17,7 +17,7 @@ const recoverySql=`SELECT key,count(*)::int AS count FROM (
  UNION ALL SELECT 'verification' FROM verification_assignments WHERE guild_id=$1 AND operation<>'none' AND updated_at<=$2-60000
  UNION ALL SELECT 'roles' FROM role_picker_panels WHERE guild_id=$1 AND state='unknown'
  UNION ALL SELECT 'roles' FROM role_picker_operations WHERE guild_id=$1 AND state='unknown'
- UNION ALL SELECT 'voice' FROM voice_rooms WHERE guild_id=$1 AND (state IN ('creating','unknown','move_failed') AND lease_until<=$2 OR state='ready' AND panel_id IS NULL)
+ UNION ALL SELECT 'voice' FROM voice_rooms WHERE guild_id=$1 AND (state IN ('creating','unknown','move_failed') AND lease_until<=$2 OR state='ready' AND (panel_id IS NULL OR panel_state IN ('sending','unknown')))
  UNION ALL SELECT 'suggestions' FROM suggestions WHERE guild_id=$1 AND (delivery_state='unknown' OR thread_state='failed')
  UNION ALL SELECT 'starboard' FROM starboard_mappings WHERE guild_id=$1 AND state='unknown'
  UNION ALL SELECT 'threads' FROM auto_threads WHERE guild_id=$1 AND state IN ('unknown','blocked')
