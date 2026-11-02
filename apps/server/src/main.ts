@@ -1,4 +1,4 @@
-import {parseRuntimeEnv} from './core/env.js';
+import {formatStartupFailure,parseRuntimeEnv} from './core/env.js';
 import {bootstrap} from './bootstrap.js';
 async function main(){
   const {runtime}=bootstrap(parseRuntimeEnv(process.env));
@@ -8,5 +8,5 @@ async function main(){
   process.once('uncaughtException',()=>shutdown(true));process.once('unhandledRejection',()=>shutdown(true));
   await runtime.start();
 }
-main().catch(()=>{process.stderr.write('Application initialization failed; check required configuration.\n');process.exitCode=1;});
+main().catch(error=>{process.stderr.write(formatStartupFailure(error));process.exitCode=1;});
 
