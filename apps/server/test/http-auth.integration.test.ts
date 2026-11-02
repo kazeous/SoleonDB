@@ -31,7 +31,12 @@ it('production cookie requires HTTPS through an explicitly trusted proxy',()=>wi
  const deps={env:{...f.env,nodeEnv:'production',redirectUri:'https://bot.example/api/auth/discord/callback',trustedProxyCidrs:['loopback']},db,clock:f.clock,logger:createLogger({write(){}}),directory:f.directory,oauth:{authorizationUrl:state=>'https://discord.example/?state='+state,exchange:async()=>({id:f.env.ownerId})},status:{health:()=>({status:200,body:{status:'ok'}}),ready:()=>({status:503,body:{status:'not_ready'}})}} satisfies import('../src/http/app.js').HttpDeps;
  const app=createHttpApp(deps);
  const untrusted=createHttpApp({...deps,env:{...deps.env,trustedProxyCidrs:[]}});
- const rejected=await supertest(untrusted).get('/api/auth/discord').set('X-Forwarded-Proto','https').expect(302);expect(rejected.headers['set-cookie']).toBeUndefined();
+ const rejected=await supertest(untrusted).get('/api/auth/discord').set('X-Forwarded-Proto','https').expect(503);expect(rejected.headers['set-cookie']).toBeUndefined();expect(rejected.headers.location).toBeUndefined();expect(rejected.body).toMatchObject({code:'unavailable',message:expect.stringContaining('TRUSTED_PROXY_CIDRS')});expect((await db.query('SELECT 1 FROM oauth_states')).rows).toHaveLength(0);expect((await db.query('SELECT 1 FROM owner_sessions')).rows).toHaveLength(0);
  const response=await supertest(app).get('/api/auth/discord').set('X-Forwarded-Proto','https').expect(302);
  expect(response.headers['set-cookie'][0]).toMatch(/HttpOnly/);expect(response.headers['set-cookie'][0]).toMatch(/Secure/);expect(response.headers['set-cookie'][0]).toMatch(/SameSite=Lax/);
+ const cookie=response.headers['set-cookie'][0].split(';')[0],state=new URL(response.headers.location).searchParams.get('state');
+ const signedIn=await supertest(app).get('/api/auth/discord/callback').set('X-Forwarded-Proto','https').set('Cookie',cookie).query({state,code:'owner'}).expect(302);
+ expect(signedIn.headers['set-cookie'][0]).toMatch(/Secure/);
+ const ownerCookie=signedIn.headers['set-cookie'][0].split(';')[0];await supertest(app).get('/api/auth/me').set('X-Forwarded-Proto','https').set('Cookie',ownerCookie).expect(200);
+ const plain=await supertest(app).get('/api/auth/discord').expect(503);expect(plain.headers.location).toBeUndefined();
 }));

@@ -7,6 +7,7 @@ function save(req:Request):Promise<void> {return new Promise((resolve,reject)=>r
 function destroy(req:Request):Promise<void> {return new Promise((resolve,reject)=>req.session.destroy(error=>error?reject(error):resolve()));}
 export function registerAuthRoutes(app:Express,deps:HttpDeps):void {
   app.get('/api/auth/discord',async(req,res)=>{
+    if(deps.env.nodeEnv==='production'&&!req.secure)throw new AppError('unavailable','Secure sign-in unavailable. Configure TRUSTED_PROXY_CIDRS for your HTTPS reverse proxy.');
     const state=opaqueToken();req.session.oauthStartedAt=deps.clock.now();await save(req);
     await deps.db.query('INSERT INTO oauth_states(state_hash,session_hash,expires_at) VALUES($1,$2,$3)',[hashToken(state),hashToken(req.sessionID),deps.clock.now()+oauthLifetimeMs]);
     res.redirect(deps.oauth.authorizationUrl(state));

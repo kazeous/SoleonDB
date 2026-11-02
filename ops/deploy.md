@@ -33,6 +33,20 @@ Keep `NODE_ENV=production`, `PORT=3000` and Coolify's exposed port at `3000`. Se
 
 An image build completing does not establish application startup. A configuration exit happens before HTTP listens, so `/health` cannot pass. The Dockerfile health command uses Node's built-in `fetch` and does not require curl or wget. Keep the health check enabled and correct the startup configuration. PostgreSQL must then be reachable and migrated for `/ready` to pass; a disconnected or standby worker truthfully remains unready.
 
+### Discord returns invalid or expired sign-in state
+
+The browser must receive an `eousbot.sid` cookie when `/api/auth/discord` redirects to Discord. Production cookies stay Secure, HttpOnly and SameSite=Lax. Express must recognize HTTPS through the actual proxy before it can issue that cookie. The local `loopback` default does not trust a separate Docker proxy container. An older build could redirect without a cookie and then reject the callback because the session IDs differed; the application now rejects that start with a clear `TRUSTED_PROXY_CIDRS` configuration error.
+
+For a standard Coolify proxy, run this in the **application container's Terminal** to discover its current proxy IPs and print a narrowly scoped setting, without reading any credentials:
+
+```sh
+node -e "require('node:dns').lookup('coolify-proxy',{all:true},(e,a)=>{if(e){console.error(e.code);process.exitCode=1;return;}console.log('TRUSTED_PROXY_CIDRS='+a.map(x=>x.address+'/'+(x.family===6?128:32)).join(','))})"
+```
+
+Save the printed value as a runtime environment variable in Coolify, then restart the application to recreate its environment. Start a new login from the configured HTTPS dashboard host. Existing expired or previously attempted callback URLs do not become valid again. Keep the callback host identical to the host where login starts, and retain the same `SESSION_SECRET` across application replicas/restarts. Check the proxy address again if the proxy container is recreated; an operator may instead configure its verified, appropriately isolated network CIDR. A custom proxy needs its own actual peer address and HTTPS forwarding configuration.
+
+Do not disable Secure cookies or trust all addresses to resolve this. See [Express session HTTPS/proxy requirements](https://expressjs.com/en/resources/middleware/session/) and [Coolify proxy networking](https://coolify.io/docs/core/networking-in-coolify).
+
 ## Stop, migrate, start
 
 1. Stop the old worker and confirm it is stopped before allowing the new worker to connect. Never run the original and replacement with the same token at once. Do not rely only on a rolling deployment's overlapping replicas.
